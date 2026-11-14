@@ -1,0 +1,53 @@
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql_sag
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Shinhan@1}
+      MSSQL_PID: Developer
+    ports:
+      - "${MSSQL_PORT:-1434}:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q \"SELECT 1\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  # One-shot job: creates the application database once SQL Server is healthy.
+  mssql-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Shinhan@1}
+    command: >
+      /bin/bash -c "/opt/mssql-tools18/bin/sqlcmd -C -S mssql -U sa -P \"$$MSSQL_SA_PASSWORD\"
+      -Q \"IF DB_ID('sag') IS NULL CREATE DATABASE sag\""
+    restart: "no"
+
+  app:
+    build: .
+    image: incident-agent:latest
+    container_name: incident_agent
+    depends_on:
+      mssql:
+        condition: service_healthy
+      mssql-init:
+        condition: service_completed_successfully
+    environment:
+      MSSQL_HOST: mssql
+      MSSQL_PORT: "1433"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Shinhan@1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "${APP_PORT:-9001}:8080"
+    restart: unless-stopped
+
+volumes:
+  mssql_data:

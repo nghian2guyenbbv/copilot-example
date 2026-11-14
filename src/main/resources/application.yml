@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: langgraph4j-incident-agent
+  datasource:
+    url: jdbc:sqlserver://${MSSQL_HOST:localhost}:${MSSQL_PORT:1434};databaseName=sag;encrypt=true;trustServerCertificate=true
+    username: sa
+    password: ${MSSQL_SA_PASSWORD:Shinhan@1}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+incident:
+  max-attempts: 3
+  llm:
+    # Leave api-key empty to use the built-in rule-based "LLM". Set it to use any OpenAI-compatible endpoint.
+    base-url: https://api.openai.com/v1
+    api-key: ${OPENAI_API_KEY:}
+    model: gpt-4o-mini

@@ -1,0 +1,75 @@
+Đã rõ! Việc chuyển từ SQLite sang **Microsoft SQL Server (MS SQL Server)** và dùng **Docker Compose** là một bước tiến sát với môi trường doanh nghiệp thực tế. Vì bạn đang ôn luyện hoặc phát triển theo hướng Senior/Backend, đây là sự lựa chọn hoàn hảo để luyện tập về transaction isolation levels, connection pooling, và quản lý container volume.
+
+Dưới đây là **Lộ trình Xây dựng (4 Cột mốc)** đã được điều chỉnh lại để tích hợp **MS SQL Server chạy qua Docker Compose**, kèm theo cấu hình mẫu sẵn sàng sử dụng.
+
+---
+
+### Bước Chuẩn bị: `docker-compose.yml` cho MS SQL Server
+
+Trước khi vào các cột mốc, hãy tạo một file `docker-compose.yml` ở thư mục gốc của dự án để khởi chạy MS SQL Server 2022:
+
+```yaml
+version: '3.8'
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql_incident_db
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Password123
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    restart: unless-stopped
+
+volumes:
+  mssql_data:
+
+```
+
+*Chạy lệnh `docker compose up -d` để khởi động cơ sở dữ liệu trước khi bắt đầu các cột mốc.*
+
+---
+
+### Lộ trình Xây dựng Đã Cập nhật (4 Cột mốc)
+
+#### Cột mốc 1: Kết nối DB, Migration & Vòng lặp cơ bản (Chưa cần LLM)
+
+* **Nhiệm vụ:** Viết script khởi tạo kết nối đến MS SQL Server (dùng Hibernate/Spring Data JPA, TypeORM, hoặc JDBC tùy ngôn ngữ bạn chọn), thiết lập các bảng (`Alerts`, `AuditLogs`, `Runbooks`), và dựng vòng lặp xử lý logic cơ bản.
+* **Điểm cần lưu ý với MS SQL Server:**
+* Xử lý chuỗi kết nối (`Connection String`) có bật mã hóa hoặc chấp nhận chứng chỉ tự ký (`trustServerCertificate=true`).
+* Kiểm tra cơ chế tự động sinh khóa chính (`IDENTITY` thay vì `AUTOINCREMENT` của SQLite).
+
+
+* **Mục tiêu:** Kiểm chứng ứng dụng kết nối thành công, tự động tạo bảng và lặp tối đa 3 lần khi giả lập lỗi hệ thống.
+
+#### Cột mốc 2: Tích hợp LLM + Tool Calling truy vấn MS SQL Server
+
+* **Nhiệm vụ:** Cung cấp cho LLM quyền gọi các công cụ (tools) để tương tác thực tế với cơ sở dữ liệu thay vì mock data:
+* `query_active_incidents()`: Lấy danh sách cảnh báo đang treo từ bảng `Alerts`.
+* `fetch_service_metrics(service_name)`: Đọc lịch sử hiệu năng gần nhất.
+
+
+* **Mục tiêu:** Ép LLM trả về cấu trúc JSON nghiêm ngặt (`action_type`, `target_service`, `risk_level`) dựa trên dữ liệu thật query ra từ MS SQL Server.
+
+#### Cột mốc 3: Transaction Bền vững, Concurrence & Phê duyệt của con người
+
+* **Nhiệm vụ:**
+* Cấu hình **Checkpointer** của LangGraph lưu trữ trạng thái trực tiếp vào bảng của MS SQL Server (thay vì lưu RAM) để nếu container ứng dụng bị sập, hệ thống vẫn phục hồi đúng tiến trình.
+* Tích hợp cơ chế `interrupt` trước khi thực thi lệnh sửa lỗi nghiêm trọng (`risk_level == "HIGH"`).
+
+
+* **Điểm cần lưu ý với MS SQL Server:** Tận dụng đặc tính ACID mạnh mẽ của MS SQL Server để quản lý transaction boundaries khi checkpoint lưu trạng thái đồ thị.
+* **Mục tiêu:** Chạy tiến trình, ngắt quãng (pause) khi gặp lệnh rủi ro cao, kiểm tra bảng checkpoint trong DB, sau đó resume thành công.
+
+#### Cột mốc 4: Xử lý Song song (Map-Reduce) & Tối ưu hóa Index
+
+* **Nhiệm vụ:**
+* Sử dụng API `Send` của LangGraph để chạy song song việc tra cứu lịch sử lỗi, kiểm tra cấu hình service và quét log từ các bảng khác nhau trong MS SQL Server cùng một lúc.
+* Tối ưu hóa hiệu năng bằng cách thêm **Clustered / Non-Clustered Indexes** trên các cột hay tìm kiếm (`service_name`, `created_at`).
+
+
+* **Mục tiêu:** Hiểu cách xử lý tranh chấp tài nguyên (deadlock/concurrency) khi nhiều nhánh đồ thị cùng ghi dữ liệu vào MS SQL Server trong một superstep.

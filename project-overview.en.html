@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LangGraph4j Incident-Response Agent - Project Overview</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --warn:#f59e0b; --ok:#34d399; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+  header { padding:40px 24px; background:linear-gradient(135deg,#1e3a8a,#0f172a); }
+  header h1 { margin:0 0 8px; font-size:2rem; }
+  header p { margin:0; color:var(--muted); max-width:900px; }
+  nav { position:sticky; top:0; background:#0b1220; padding:10px 24px; display:flex; gap:16px; flex-wrap:wrap; border-bottom:1px solid #334155; z-index:5; }
+  nav a { color:var(--accent); text-decoration:none; font-size:.9rem; }
+  main { max-width:1100px; margin:0 auto; padding:24px; }
+  section { margin-bottom:40px; }
+  h2 { border-bottom:2px solid var(--accent); padding-bottom:6px; }
+  h3 { color:var(--accent); margin-bottom:4px; }
+  .card { background:var(--card); border-radius:10px; padding:16px 20px; margin:12px 0; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:.92rem; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #334155; vertical-align:top; }
+  th { color:var(--accent); }
+  code { background:#0b1220; padding:1px 6px; border-radius:4px; color:#fbbf24; font-size:.88rem; }
+  pre { background:#0b1220; padding:14px; border-radius:8px; overflow:auto; font-size:.85rem; color:#cbd5e1; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; font-size:.75rem; margin-right:4px; }
+  .low { background:#064e3b; color:var(--ok); } .high { background:#7f1d1d; color:var(--bad); } .pause { background:#78350f; color:var(--warn); }
+  .flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:14px 0; }
+  .node { background:#0b1220; border:1px solid var(--accent); border-radius:8px; padding:8px 12px; font-size:.85rem; }
+  .node.gate { border-color:var(--warn); color:var(--warn); }
+  .arrow { color:var(--muted); }
+  .par { display:flex; flex-direction:column; gap:4px; border-left:3px solid var(--ok); padding-left:8px; }
+  ul { padding-left:20px; }
+  .diagram { background:var(--card); border-radius:10px; padding:12px; margin:14px 0; overflow:auto; }
+  .diagram svg { width:100%; height:auto; min-width:640px; font-family:Segoe UI,Roboto,Arial,sans-serif; }
+  .diagram figcaption { color:var(--muted); font-size:.85rem; text-align:center; margin-top:6px; }
+  figure { margin:0; }
+  svg text { fill:#e2e8f0; font-size:13px; }
+  svg .sm { font-size:11px; fill:#94a3b8; }
+  svg .title { font-size:14px; font-weight:bold; fill:#38bdf8; }
+  svg .box { fill:#0b1220; stroke:#38bdf8; stroke-width:1.5; }
+  svg .boxw { fill:#2a1d05; stroke:#f59e0b; stroke-width:2; }
+  svg .boxg { fill:#06261c; stroke:#34d399; stroke-width:1.5; }
+  svg .boxp { fill:#1e1b4b; stroke:#a78bfa; stroke-width:1.5; }
+  svg .line { stroke:#94a3b8; stroke-width:1.5; fill:none; }
+  svg .lineg { stroke:#34d399; stroke-width:1.5; fill:none; }
+  svg .linew { stroke:#f59e0b; stroke-width:1.5; fill:none; stroke-dasharray:5 3; }
+  svg .lane { stroke:#475569; stroke-width:1; stroke-dasharray:4 4; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LangGraph4j Incident-Response Agent</h1>
+  <p>A Spring Boot 3 / Java 17 / Maven application where an AI agent receives a system alert (e.g. "High CPU and connection pool exhaustion on payment-service"), investigates, plans a fix, <strong>pauses for human approval before any dangerous command</strong>, executes the fix, and verifies recovery in a loop. State and data live in Microsoft SQL Server (Docker Compose).</p>
+</header>
+<nav>
+  <a href="#stack">Stack</a><a href="#structure">Structure</a><a href="#graph">Graph</a><a href="#nodes">Nodes</a><a href="#state">State</a>
+  <a href="#llm">LLM layer</a><a href="#db">Database</a><a href="#checkpoint">Checkpointing</a><a href="#api">REST API</a><a href="#docker">Docker</a><a href="#tests">Tests</a><a href="#run">Run</a>
+</nav>
+<main>
+
+<section id="stack">
+<h2>1. Technology stack</h2>
+<table>
+<tr><th>Piece</th><th>Role</th></tr>
+<tr><td>Java 17, Maven</td><td>Language / build (<code>pom.xml</code>)</td></tr>
+<tr><td>Spring Boot 3.3.5</td><td>Web (REST), dependency injection, JPA, configuration</td></tr>
+<tr><td>LangGraph4j 1.9.9 (<code>langgraph4j-core</code>)</td><td>Agent workflow as a state graph, with interrupts and checkpoints</td></tr>
+<tr><td>Spring Data JPA + Hibernate</td><td>Entities / repositories, auto-creates tables (<code>ddl-auto: update</code>)</td></tr>
+<tr><td>SQL Server 2022 + <code>mssql-jdbc</code></td><td>Business data and graph checkpoints</td></tr>
+<tr><td>Docker Compose</td><td>Runs SQL Server and creates the <code>sag</code> database</td></tr>
+<tr><td>JUnit 5 / SpringBootTest</td><td>Integration tests against the real database</td></tr>
+</table>
+</section>
+
+<section id="structure">
+<h2>2. Project structure</h2>
+<pre>
+langraph-with-spring-manven/
+├── pom.xml                      Maven build and dependencies
+├── docker-compose.yml           SQL Server 2022 + one-shot DB initializer
+├── lo-trinh.txt                 The 4-milestone roadmap this project implements
+├── README.md                    Quick start
+├── project-overview.html        This document
+└── src/
+    ├── main/resources/application.yml
+    ├── main/java/com/example/demo/
+    │   ├── DemoApplication.java            Spring Boot entry point
+    │   └── incident/
+    │       ├── IncidentController.java    REST endpoints
+    │       ├── IncidentService.java       Starts / resumes graph runs
+    │       ├── domain/                    JPA entities, repositories, tools
+    │       ├── llm/                       LLM contract + clients
+    │       ├── graph/                     State, nodes, graph definition, simulator
+    │       └── checkpoint/                SQL Server checkpoint saver
+    └── test/java/com/example/demo/IncidentFlowTest.java
+</pre>
+
+<h3>Architecture at a glance</h3>
+<figure class="diagram">
+<svg viewBox="0 0 900 430" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+  <text x="20" y="28" class="title">Client</text>
+  <rect class="box" x="20" y="38" width="170" height="50" rx="8"/>
+  <text x="105" y="68" text-anchor="middle">Operator / curl / UI</text>
+
+  <text x="250" y="28" class="title">Spring Boot application</text>
+  <rect x="240" y="38" width="440" height="372" rx="12" fill="none" stroke="#475569" stroke-dasharray="6 4"/>
+
+  <rect class="box" x="260" y="55" width="400" height="44" rx="8"/>
+  <text x="460" y="74" text-anchor="middle">IncidentController</text>
+  <text x="460" y="90" text-anchor="middle" class="sm">REST: /incidents, /approval, /audit</text>
+
+  <rect class="box" x="260" y="120" width="400" height="44" rx="8"/>
+  <text x="460" y="139" text-anchor="middle">IncidentService</text>
+  <text x="460" y="155" text-anchor="middle" class="sm">start run · apply human decision · resume · sync alert status</text>
+
+  <rect class="boxw" x="260" y="185" width="400" height="95" rx="8"/>
+  <text x="460" y="205" text-anchor="middle">LangGraph4j CompiledGraph (IncidentGraphConfig)</text>
+  <text x="460" y="224" text-anchor="middle" class="sm">IncidentNodes · IncidentState · interruptBefore(approval_gate)</text>
+  <rect class="boxg" x="275" y="238" width="105" height="30" rx="6"/><text x="327" y="258" text-anchor="middle" class="sm">parallel lookups</text>
+  <rect class="boxp" x="390" y="238" width="115" height="30" rx="6"/><text x="447" y="258" text-anchor="middle" class="sm">decide (LLM)</text>
+  <rect class="box" x="515" y="238" width="130" height="30" rx="6"/><text x="580" y="258" text-anchor="middle" class="sm">execute · verify</text>
+
+  <rect class="boxp" x="260" y="305" width="190" height="50" rx="8"/>
+  <text x="355" y="326" text-anchor="middle">DecisionService</text>
+  <text x="355" y="343" text-anchor="middle" class="sm">validates strict JSON</text>
+  <rect class="box" x="470" y="305" width="190" height="50" rx="8"/>
+  <text x="565" y="326" text-anchor="middle">SimulatedEnvironment</text>
+  <text x="565" y="343" text-anchor="middle" class="sm">fake kubectl / psql</text>
+
+  <rect class="box" x="260" y="368" width="190" height="34" rx="8"/><text x="355" y="390" text-anchor="middle" class="sm">IncidentTools + Repositories</text>
+  <rect class="box" x="470" y="368" width="190" height="34" rx="8"/><text x="565" y="390" text-anchor="middle" class="sm">SqlServerCheckpointSaver</text>
+
+  <text x="730" y="28" class="title">External</text>
+  <rect class="boxp" x="720" y="305" width="160" height="50" rx="8"/>
+  <text x="800" y="326" text-anchor="middle">LLM</text>
+  <text x="800" y="343" text-anchor="middle" class="sm">OpenAI-compatible or rule-based</text>
+  <rect class="boxg" x="720" y="368" width="160" height="34" rx="8"/><text x="800" y="390" text-anchor="middle">SQL Server (Docker)</text>
+
+  <path class="line" d="M190,63 H260" marker-end="url(#a1)"/>
+  <path class="line" d="M460,99 V120" marker-end="url(#a1)"/>
+  <path class="line" d="M460,164 V185" marker-end="url(#a1)"/>
+  <path class="line" d="M447,268 L380,305" marker-end="url(#a1)"/>
+  <path class="line" d="M580,268 L565,305" marker-end="url(#a1)"/>
+  <path class="line" d="M450,330 H720" marker-end="url(#a1)"/>
+  <path class="line" d="M355,355 V368" marker-end="url(#a1)"/>
+  <path class="lineg" d="M450,385 H720" marker-end="url(#a1)"/>
+  <path class="lineg" d="M660,385 H720"/>
+  <path class="lineg" d="M565,355 V368"/>
+</svg>
+<figcaption>Layers: REST → service → graph → helpers → external LLM and SQL Server.</figcaption>
+</figure>
+</section>
+
+<section id="graph">
+<h2>3. The agent graph</h2>
+<div class="card">
+<div class="flow">
+  <span class="node">START</span><span class="arrow">→</span>
+  <span class="node">dispatch</span><span class="arrow">→ fan-out →</span>
+  <div class="par">
+    <span class="node">lookup_history</span>
+    <span class="node">lookup_runbooks</span>
+    <span class="node">scan_metrics</span>
+  </div>
+  <span class="arrow">→ fan-in →</span>
+  <span class="node">decide (LLM)</span><span class="arrow">→</span>
+  <span class="node gate">approval_gate ⏸ INTERRUPT</span><span class="arrow">→</span>
+  <span class="node">execute</span><span class="arrow">→</span>
+  <span class="node">verify</span><span class="arrow">→</span>
+  <span class="node">END</span>
+</div>
+<ul>
+  <li><strong>Parallel investigation:</strong> the three lookup nodes run in the same superstep, each writing a different state key and its own audit row.</li>
+  <li><strong>Risk routing:</strong> after <code>decide</code>, <span class="tag high">HIGH</span> risk goes through <code>approval_gate</code>; <span class="tag low">LOW</span>/MEDIUM goes straight to <code>execute</code>.</li>
+  <li><strong>Human in the loop:</strong> the graph is compiled with <code>interruptBefore("approval_gate")</code>. It stops, persists state, and waits. Rejection ends the incident with nothing executed.</li>
+  <li><strong>Retry loop:</strong> if <code>verify</code> finds the system still unhealthy, the graph returns to <code>dispatch</code> (max 3 attempts, then <code>ESCALATED</code>). A new dangerous plan asks for approval again.</li>
+</ul>
+</div>
+
+<figure class="diagram">
+<svg viewBox="0 0 920 470" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+    <marker id="a2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#34d399"/></marker>
+    <marker id="a2w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"/></marker>
+  </defs>
+  <rect class="box" x="10" y="190" width="70" height="36" rx="18"/><text x="45" y="213" text-anchor="middle">START</text>
+  <rect class="box" x="105" y="190" width="100" height="36" rx="8"/><text x="155" y="213" text-anchor="middle">dispatch</text>
+
+  <rect x="240" y="60" width="170" height="290" rx="10" fill="none" stroke="#34d399" stroke-dasharray="5 4"/>
+  <text x="325" y="52" text-anchor="middle" class="sm" style="fill:#34d399">same superstep (parallel)</text>
+  <rect class="boxg" x="255" y="85" width="140" height="44" rx="8"/><text x="325" y="105" text-anchor="middle">lookup_history</text><text x="325" y="120" text-anchor="middle" class="sm">AuditLogs</text>
+  <rect class="boxg" x="255" y="178" width="140" height="44" rx="8"/><text x="325" y="198" text-anchor="middle">lookup_runbooks</text><text x="325" y="213" text-anchor="middle" class="sm">Runbooks</text>
+  <rect class="boxg" x="255" y="271" width="140" height="44" rx="8"/><text x="325" y="291" text-anchor="middle">scan_metrics</text><text x="325" y="306" text-anchor="middle" class="sm">ServiceMetrics</text>
+
+  <rect class="boxp" x="450" y="186" width="120" height="44" rx="8"/><text x="510" y="206" text-anchor="middle">decide</text><text x="510" y="221" text-anchor="middle" class="sm">LLM → JSON</text>
+
+  <path d="M620,208 L670,188 L720,208 L670,228 Z" fill="#0b1220" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="670" y="212" text-anchor="middle" class="sm">risk HIGH?</text>
+
+  <rect class="boxw" x="605" y="80" width="130" height="50" rx="8"/><text x="670" y="102" text-anchor="middle">approval_gate</text><text x="670" y="119" text-anchor="middle" class="sm">⏸ INTERRUPT (human)</text>
+  <rect class="box" x="640" y="290" width="100" height="40" rx="8"/><text x="690" y="315" text-anchor="middle">execute</text>
+  <rect class="box" x="790" y="290" width="100" height="40" rx="8"/><text x="840" y="315" text-anchor="middle">verify</text>
+  <rect class="box" x="790" y="190" width="100" height="36" rx="18"/><text x="840" y="213" text-anchor="middle">END</text>
+  <rect class="box" x="790" y="90" width="100" height="36" rx="18"/><text x="840" y="113" text-anchor="middle">END</text>
+  <text x="840" y="82" text-anchor="middle" class="sm">(rejected)</text>
+
+  <path class="line" d="M80,208 H105" marker-end="url(#a2)"/>
+  <path class="lineg" d="M205,208 C225,208 225,107 255,107" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M205,208 H255" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M205,208 C225,208 225,293 255,293" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M395,107 C430,107 430,200 450,200" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M395,200 H450" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M395,293 C430,293 430,216 450,216" marker-end="url(#a2g)"/>
+  <path class="line" d="M570,208 H620" marker-end="url(#a2)"/>
+  <path class="linew" d="M670,188 V130" marker-end="url(#a2w)"/>
+  <text x="680" y="165" class="sm" style="fill:#f59e0b">yes</text>
+  <path class="line" d="M670,228 V290" marker-end="url(#a2)"/>
+  <text x="680" y="262" class="sm">no</text>
+  <path class="linew" d="M735,105 C760,105 760,300 740,305" marker-end="url(#a2w)"/>
+  <text x="762" y="200" class="sm" style="fill:#f59e0b">approved</text>
+  <path class="line" d="M735,95 H790" marker-end="url(#a2)"/>
+  <text x="745" y="88" class="sm">rejected</text>
+  <path class="line" d="M740,310 H790" marker-end="url(#a2)"/>
+  <path class="line" d="M840,290 V226" marker-end="url(#a2)"/>
+  <text x="850" y="262" class="sm">recovered / max attempts</text>
+  <path class="line" d="M840,330 V420 H155 V226" marker-end="url(#a2)"/>
+  <text x="400" y="438" class="sm">not recovered and attempts left → retry (back to dispatch)</text>
+</svg>
+<figcaption>Full graph. Green = parallel branches, amber = human approval path.</figcaption>
+</figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 900 150" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+  <text x="450" y="20" text-anchor="middle" class="title">Incident / alert status lifecycle</text>
+  <rect class="box" x="20" y="50" width="110" height="40" rx="20"/><text x="75" y="75" text-anchor="middle">OPEN</text>
+  <rect class="box" x="190" y="50" width="130" height="40" rx="20"/><text x="255" y="75" text-anchor="middle">INVESTIGATING</text>
+  <rect class="box" x="380" y="50" width="110" height="40" rx="20"/><text x="435" y="75" text-anchor="middle">PLANNED</text>
+  <rect class="boxw" x="550" y="50" width="130" height="40" rx="20"/><text x="615" y="75" text-anchor="middle">awaiting approval</text>
+  <rect class="box" x="740" y="50" width="110" height="40" rx="20"/><text x="795" y="75" text-anchor="middle">EXECUTED</text>
+  <rect class="boxg" x="740" y="105" width="110" height="34" rx="17"/><text x="795" y="127" text-anchor="middle">RESOLVED</text>
+  <rect class="box" x="550" y="105" width="130" height="34" rx="17"/><text x="615" y="127" text-anchor="middle" class="sm">REJECTED / ESCALATED</text>
+  <path class="line" d="M130,70 H190" marker-end="url(#a3)"/>
+  <path class="line" d="M320,70 H380" marker-end="url(#a3)"/>
+  <path class="line" d="M490,70 H550" marker-end="url(#a3)"/>
+  <path class="line" d="M680,70 H740" marker-end="url(#a3)"/>
+  <path class="line" d="M795,90 V105" marker-end="url(#a3)"/>
+  <path class="line" d="M615,90 V105" marker-end="url(#a3)"/>
+</svg>
+<figcaption>RETRYING (not shown) loops EXECUTED back to INVESTIGATING, up to 3 attempts.</figcaption>
+</figure>
+</section>
+
+<section id="nodes">
+<h2>4. Graph components (<code>incident/graph</code>)</h2>
+<table>
+<tr><th>Class / node</th><th>Responsibility</th></tr>
+<tr><td><code>IncidentGraphConfig</code></td><td>Spring <code>@Configuration</code> that builds and compiles the <code>StateGraph</code> bean: nodes, edges, conditional routing, interrupt, checkpoint saver.</td></tr>
+<tr><td><code>IncidentNodes</code></td><td>Contains all node logic (below), writing audit rows to the DB.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>dispatch</code></td><td>Marks investigation start; entry point of each loop iteration.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>lookup_history</code></td><td>Finds past executed actions for the same service in earlier incidents.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>lookup_runbooks</code></td><td>Loads the service's runbooks from the <code>Runbooks</code> table.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>scan_metrics</code></td><td>Uses the <code>fetchServiceMetrics</code> tool and derives findings (high CPU, pool exhausted, leak).</td></tr>
+<tr><td>&nbsp;&nbsp;<code>decide</code></td><td>Builds a <code>DecisionContext</code>, asks the LLM, creates a <code>RemediationStep</code>, increments the attempt counter.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>approval_gate</code></td><td>Runs after a human decision is written to state; records APPROVED or REJECTED.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>execute</code></td><td>Runs the approved action via the environment and audits <code>EXECUTED_&lt;ACTION&gt;</code>.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>verify</code></td><td>Re-reads the latest metrics; healthy means CPU &lt; 70% and pool usage &lt; 70%. Sets RESOLVED / RETRYING / ESCALATED.</td></tr>
+<tr><td><code>SimulatedEnvironment</code></td><td>Stand-in for kubectl/psql. Each action appends a new <code>ServiceMetrics</code> row (scale out halves CPU; killing sessions is undone by the leak; restart clears the leak). Also seeds an unhealthy service and runbooks on first alert.</td></tr>
+<tr><td><code>RemediationStep</code></td><td>Serializable record: <code>command</code>, <code>dangerous</code>, <code>reason</code>. Must be serializable to be checkpointed.</td></tr>
+</table>
+</section>
+
+<section id="state">
+<h2>5. Graph state (<code>IncidentState</code>)</h2>
+<p>Extends LangGraph4j <code>AgentState</code>; each key is a channel in <code>SCHEMA</code>.</p>
+<table>
+<tr><th>Key</th><th>Meaning</th></tr>
+<tr><td><code>incidentId</code>, <code>service</code>, <code>alert</code></td><td>Identity of the incident (id equals the Alerts row id and the checkpoint thread id)</td></tr>
+<tr><td><code>findings</code>, <code>history</code>, <code>runbooks</code></td><td>Outputs of the three parallel lookups</td></tr>
+<tr><td><code>actionType</code>, <code>riskLevel</code>, <code>plan</code></td><td>The LLM's decision and resulting step</td></tr>
+<tr><td><code>approval</code></td><td>PENDING / APPROVED / REJECTED, set by the human</td></tr>
+<tr><td><code>attempt</code>, <code>recovered</code>, <code>status</code></td><td>Loop control and lifecycle</td></tr>
+<tr><td><code>timeline</code></td><td>Append-only log of everything that happened (appender channel)</td></tr>
+</table>
+</section>
+
+<section id="llm">
+<h2>6. LLM layer (<code>incident/llm</code>)</h2>
+<table>
+<tr><th>Class</th><th>Responsibility</th></tr>
+<tr><td><code>Decision</code></td><td>The strict JSON contract: <code>action_type</code>, <code>target_service</code>, <code>risk_level</code>.</td></tr>
+<tr><td><code>ActionType</code></td><td>Enum: <code>SCALE_OUT</code>, <code>KILL_IDLE_SESSIONS</code>, <code>RESTART_SERVICE</code>, <code>NONE</code>, each with a command template.</td></tr>
+<tr><td><code>RiskLevel</code></td><td>Enum: LOW, MEDIUM, HIGH.</td></tr>
+<tr><td><code>DecisionContext</code></td><td>Everything the LLM may see: active incidents, recent metrics, actions already taken, runbooks, health flags.</td></tr>
+<tr><td><code>LlmClient</code></td><td>Interface returning raw JSON for a context.</td></tr>
+<tr><td><code>RuleBasedLlm</code></td><td>Offline rule-based implementation, active when no API key is set.</td></tr>
+<tr><td><code>OpenAiLlm</code></td><td>OpenAI-compatible <code>/chat/completions</code> client in JSON mode, active when <code>OPENAI_API_KEY</code> is set.</td></tr>
+<tr><td><code>DecisionService</code></td><td>Parses and validates the JSON (unknown fields, missing fields, wrong target service), retrying once with the error message.</td></tr>
+</table>
+</section>
+
+<section id="db">
+<h2>7. Database and domain (<code>incident/domain</code>)</h2>
+<table>
+<tr><th>Table / entity</th><th>Purpose</th><th>Indexes</th></tr>
+<tr><td><code>Alerts</code> / <code>Alert</code></td><td>Incoming alerts and their status (OPEN, RESOLVED, REJECTED, ESCALATED)</td><td><code>(service_name, created_at)</code>, <code>status</code></td></tr>
+<tr><td><code>AuditLogs</code> / <code>AuditLog</code></td><td>Every node action per incident (who/what/when)</td><td><code>alert_id</code>, <code>(service_name, created_at)</code></td></tr>
+<tr><td><code>Runbooks</code> / <code>Runbook</code></td><td>Per-service remediation guidance</td><td><code>service_name</code></td></tr>
+<tr><td><code>ServiceMetrics</code> / <code>ServiceMetric</code></td><td>Time series of CPU, pool usage, replicas, leak flag</td><td><code>(service_name, created_at)</code></td></tr>
+<tr><td><code>lg_checkpoints</code></td><td>LangGraph4j checkpoints (created by the saver, not JPA)</td><td>unique <code>(thread_id, seq DESC)</code></td></tr>
+</table>
+<figure class="diagram">
+<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+  <rect class="box" x="20" y="20" width="200" height="120" rx="8"/>
+  <text x="120" y="42" text-anchor="middle" class="title">Alerts</text>
+  <text x="32" y="64" class="sm">id (PK, IDENTITY)</text><text x="32" y="80" class="sm">service_name</text><text x="32" y="96" class="sm">message</text><text x="32" y="112" class="sm">status</text><text x="32" y="128" class="sm">created_at</text>
+
+  <rect class="box" x="350" y="20" width="200" height="120" rx="8"/>
+  <text x="450" y="42" text-anchor="middle" class="title">AuditLogs</text>
+  <text x="362" y="64" class="sm">id (PK, IDENTITY)</text><text x="362" y="80" class="sm">alert_id → Alerts.id</text><text x="362" y="96" class="sm">service_name · node · action</text><text x="362" y="112" class="sm">detail</text><text x="362" y="128" class="sm">created_at</text>
+
+  <rect class="box" x="680" y="20" width="200" height="104" rx="8"/>
+  <text x="780" y="42" text-anchor="middle" class="title">Runbooks</text>
+  <text x="692" y="64" class="sm">id (PK, IDENTITY)</text><text x="692" y="80" class="sm">service_name</text><text x="692" y="96" class="sm">action_type</text><text x="692" y="112" class="sm">instructions</text>
+
+  <rect class="box" x="20" y="175" width="230" height="120" rx="8"/>
+  <text x="135" y="197" text-anchor="middle" class="title">ServiceMetrics</text>
+  <text x="32" y="219" class="sm">id (PK, IDENTITY) · service_name</text><text x="32" y="235" class="sm">cpu_percent · pool_active · pool_max</text><text x="32" y="251" class="sm">replicas · connection_leak</text><text x="32" y="267" class="sm">created_at  (index: service_name, created_at)</text>
+
+  <rect class="boxw" x="350" y="175" width="300" height="120" rx="8"/>
+  <text x="500" y="197" text-anchor="middle" class="title">lg_checkpoints (LangGraph4j)</text>
+  <text x="362" y="219" class="sm">seq (IDENTITY) · thread_id = Alerts.id</text><text x="362" y="235" class="sm">checkpoint_id (PK with thread_id)</text><text x="362" y="251" class="sm">node_id · next_node_id</text><text x="362" y="267" class="sm">state (JSON) · saved_at</text>
+
+  <path class="line" d="M350,80 H220" marker-end="url(#a4)"/>
+  <text x="285" y="72" text-anchor="middle" class="sm">N : 1</text>
+  <path class="linew" d="M500,175 C500,160 150,160 120,140" stroke="#f59e0b" fill="none" stroke-dasharray="5 3" marker-end="url(#a4)"/>
+  <text x="330" y="158" class="sm">same id used as thread</text>
+  <text x="780" y="150" text-anchor="middle" class="sm">Runbooks and ServiceMetrics are linked by service_name (no FK)</text>
+</svg>
+<figcaption>Data model. Runbooks and metrics are looked up by service name; audit rows and checkpoints by incident id.</figcaption>
+</figure>
+<p>Primary keys use SQL Server <code>IDENTITY</code>. The four <code>*Repository</code> interfaces are Spring Data JPA repositories. <code>IncidentTools</code> exposes the agent tools <code>queryActiveIncidents()</code> and <code>fetchServiceMetrics(service)</code>, which read real rows.</p>
+</section>
+
+<section id="checkpoint">
+<h2>8. Durable checkpointing (<code>SqlServerCheckpointSaver</code>)</h2>
+<div class="card">
+<ul>
+  <li>Extends LangGraph4j <code>AbstractCheckpointSaver</code> and stores each checkpoint as a row in <code>lg_checkpoints</code> (state serialized to <code>NVARCHAR(MAX)</code>).</li>
+  <li>Creates the table itself at startup if missing.</li>
+  <li>Each insert/update/delete runs in its own JDBC transaction (commit or rollback), so a crash never leaves a half-written checkpoint.</li>
+  <li>Because state is in the database, a paused incident survives an application restart and can be resumed by approving it afterwards.</li>
+  <li>Graph is compiled with <code>releaseThread(false)</code> so the final state stays readable after the run ends.</li>
+</ul>
+</div>
+</section>
+
+<section id="api">
+<h2>9. Service and REST API</h2>
+<p><code>IncidentService</code> saves the alert, seeds the simulation, runs the graph (draining the stream until END or the interrupt), applies the human decision with <code>updateState</code>, resumes with <code>GraphInput.resume()</code>, and syncs the final status back to the <code>Alerts</code> row.</p>
+<table>
+<tr><th>Method</th><th>Path</th><th>Description</th></tr>
+<tr><td>POST</td><td><code>/incidents</code></td><td>Body <code>{"serviceName","message"}</code>. Runs until finished or paused for approval.</td></tr>
+<tr><td>POST</td><td><code>/incidents/{id}/approval</code></td><td>Body <code>{"approved":true|false}</code>. 409 if the incident is not waiting.</td></tr>
+<tr><td>GET</td><td><code>/incidents/{id}</code></td><td>Current status, findings, plan, timeline, <code>awaitingApproval</code>.</td></tr>
+<tr><td>GET</td><td><code>/incidents/{id}/audit</code></td><td>Audit trail from the database.</td></tr>
+</table>
+<figure class="diagram">
+<svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+  <text x="80" y="22" text-anchor="middle" class="title">Operator</text>
+  <text x="290" y="22" text-anchor="middle" class="title">API + Service</text>
+  <text x="520" y="22" text-anchor="middle" class="title">LangGraph4j</text>
+  <text x="720" y="22" text-anchor="middle" class="title">LLM</text>
+  <text x="840" y="22" text-anchor="middle" class="title">SQL Server</text>
+  <path class="lane" d="M80,30 V460"/><path class="lane" d="M290,30 V460"/><path class="lane" d="M520,30 V460"/><path class="lane" d="M720,30 V460"/><path class="lane" d="M840,30 V460"/>
+
+  <path class="line" d="M80,50 H290" marker-end="url(#a5)"/><text x="185" y="44" text-anchor="middle" class="sm">POST /incidents</text>
+  <path class="line" d="M290,72 H520" marker-end="url(#a5)"/><text x="405" y="66" text-anchor="middle" class="sm">run graph</text>
+  <path class="line" d="M520,94 H840" marker-end="url(#a5)"/><text x="680" y="88" text-anchor="middle" class="sm">parallel lookups (read tables, write audit)</text>
+  <path class="line" d="M520,120 H720" marker-end="url(#a5)"/><text x="620" y="114" text-anchor="middle" class="sm">decide → JSON</text>
+  <path class="line" d="M520,146 H840" marker-end="url(#a5)"/><text x="680" y="140" text-anchor="middle" class="sm">LOW risk: execute, verify, checkpoint</text>
+  <path class="line" d="M520,172 H840" marker-end="url(#a5)"/><text x="680" y="166" text-anchor="middle" class="sm">retry: decide HIGH → save checkpoint</text>
+  <rect class="boxw" x="440" y="186" width="160" height="26" rx="6"/><text x="520" y="204" text-anchor="middle" class="sm">⏸ paused at approval_gate</text>
+  <path class="line" d="M290,226 H80" marker-end="url(#a5)"/><text x="185" y="220" text-anchor="middle" class="sm">awaitingApproval=true + plan</text>
+
+  <rect x="20" y="246" width="840" height="28" rx="6" fill="#3b0d0d" stroke="#f87171"/>
+  <text x="440" y="265" text-anchor="middle" style="fill:#f87171">(optional) application crashes / restarts — state is safe in lg_checkpoints</text>
+
+  <path class="line" d="M80,300 H290" marker-end="url(#a5)"/><text x="185" y="294" text-anchor="middle" class="sm">POST /approval {approved:true}</text>
+  <path class="line" d="M290,322 H840" marker-end="url(#a5)"/><text x="565" y="316" text-anchor="middle" class="sm">updateState(APPROVED) — checkpoint updated</text>
+  <path class="line" d="M290,348 H520" marker-end="url(#a5)"/><text x="405" y="342" text-anchor="middle" class="sm">resume()</text>
+  <path class="line" d="M520,374 H840" marker-end="url(#a5)"/><text x="680" y="368" text-anchor="middle" class="sm">execute → audit → verify → checkpoint</text>
+  <path class="line" d="M290,400 H840" marker-end="url(#a5)"/><text x="565" y="394" text-anchor="middle" class="sm">sync Alerts.status (RESOLVED / …)</text>
+  <path class="line" d="M290,432 H80" marker-end="url(#a5)"/><text x="185" y="426" text-anchor="middle" class="sm">final status or next approval</text>
+</svg>
+<figcaption>Request sequence including the human approval pause and a crash/restart in the middle.</figcaption>
+</figure>
+
+<h3>Typical scenario</h3>
+<pre>
+1. POST /incidents                -> attempt 1: SCALE_OUT (LOW) runs automatically, still unhealthy
+                                    attempt 2: KILL_IDLE_SESSIONS (HIGH) -> paused, awaitingApproval=true
+2. POST /incidents/{id}/approval  -> executes; leak refills the pool -> attempt 3: RESTART_SERVICE (HIGH) -> paused again
+3. POST /incidents/{id}/approval  -> restart clears the leak -> verify OK -> status RESOLVED
+</pre>
+</section>
+
+<section id="docker">
+<h2>10. Configuration and Docker</h2>
+<ul>
+  <li><code>docker-compose.yml</code>: service <code>mssql</code> (SQL Server 2022, healthcheck, persistent volume <code>mssql_data</code>, host port <code>1434</code> by default via <code>MSSQL_PORT</code>) and one-shot <code>mssql-init</code> that creates <code>sag</code> once healthy.</li>
+  <li><code>application.yml</code>: JDBC URL with <code>encrypt=true;trustServerCertificate=true</code>, Hikari pool size, <code>ddl-auto: update</code>, <code>incident.max-attempts</code>, and LLM settings (<code>base-url</code>, <code>api-key</code>, <code>model</code>).</li>
+  <li>Environment overrides: <code>MSSQL_HOST</code>, <code>MSSQL_PORT</code>, <code>MSSQL_SA_PASSWORD</code>, <code>OPENAI_API_KEY</code>. The default SA password is for local development only.</li>
+</ul>
+</section>
+
+<section id="tests">
+<h2>11. Tests (<code>IncidentFlowTest</code>)</h2>
+<ul>
+  <li><strong>Full loop with approvals:</strong> pause, checkpoint row exists, approve twice, ends RESOLVED, audit shows all three executed actions.</li>
+  <li><strong>Rejection:</strong> dangerous command never executes and a further approval returns an error.</li>
+  <li><strong>Parallel branches:</strong> all three lookup nodes wrote audit rows.</li>
+</ul>
+<p>They are integration tests and need the SQL Server container running.</p>
+</section>
+
+<section id="run">
+<h2>12. How to run</h2>
+<pre>
+docker compose up -d
+mvn test
+mvn spring-boot:run        # http://localhost:8080
+</pre>
+<h3>Limitations</h3>
+<ul>
+  <li>Infrastructure actions are simulated; replace <code>SimulatedEnvironment</code> with real executors for production.</li>
+  <li>LangGraph4j has no <code>Send</code> API, so parallelism uses multiple outgoing edges.</li>
+  <li>The OpenAI path is untested without an API key; no deadlock stress test yet.</li>
+</ul>
+</section>
+
+</main>
+</body>
+</html>

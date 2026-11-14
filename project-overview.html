@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LangGraph4j Incident-Response Agent - Tổng quan dự án</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --warn:#f59e0b; --ok:#34d399; --bad:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+  header { padding:40px 24px; background:linear-gradient(135deg,#1e3a8a,#0f172a); }
+  header h1 { margin:0 0 8px; font-size:2rem; }
+  header p { margin:0; color:var(--muted); max-width:900px; }
+  nav { position:sticky; top:0; background:#0b1220; padding:10px 24px; display:flex; gap:16px; flex-wrap:wrap; border-bottom:1px solid #334155; z-index:5; }
+  nav a { color:var(--accent); text-decoration:none; font-size:.9rem; }
+  main { max-width:1100px; margin:0 auto; padding:24px; }
+  section { margin-bottom:40px; }
+  h2 { border-bottom:2px solid var(--accent); padding-bottom:6px; }
+  h3 { color:var(--accent); margin-bottom:4px; }
+  .card { background:var(--card); border-radius:10px; padding:16px 20px; margin:12px 0; }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:.92rem; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #334155; vertical-align:top; }
+  th { color:var(--accent); }
+  code { background:#0b1220; padding:1px 6px; border-radius:4px; color:#fbbf24; font-size:.88rem; }
+  pre { background:#0b1220; padding:14px; border-radius:8px; overflow:auto; font-size:.85rem; color:#cbd5e1; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; font-size:.75rem; margin-right:4px; }
+  .low { background:#064e3b; color:var(--ok); } .high { background:#7f1d1d; color:var(--bad); }
+  .flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:14px 0; }
+  .node { background:#0b1220; border:1px solid var(--accent); border-radius:8px; padding:8px 12px; font-size:.85rem; }
+  .node.gate { border-color:var(--warn); color:var(--warn); }
+  .arrow { color:var(--muted); }
+  .par { display:flex; flex-direction:column; gap:4px; border-left:3px solid var(--ok); padding-left:8px; }
+  ul { padding-left:20px; }
+  .diagram { background:var(--card); border-radius:10px; padding:12px; margin:14px 0; overflow:auto; }
+  .diagram svg { width:100%; height:auto; min-width:640px; font-family:Segoe UI,Roboto,Arial,sans-serif; }
+  .diagram figcaption { color:var(--muted); font-size:.85rem; text-align:center; margin-top:6px; }
+  figure { margin:0; }
+  svg text { fill:#e2e8f0; font-size:13px; }
+  svg .sm { font-size:11px; fill:#94a3b8; }
+  svg .title { font-size:14px; font-weight:bold; fill:#38bdf8; }
+  svg .box { fill:#0b1220; stroke:#38bdf8; stroke-width:1.5; }
+  svg .boxw { fill:#2a1d05; stroke:#f59e0b; stroke-width:2; }
+  svg .boxg { fill:#06261c; stroke:#34d399; stroke-width:1.5; }
+  svg .boxp { fill:#1e1b4b; stroke:#a78bfa; stroke-width:1.5; }
+  svg .line { stroke:#94a3b8; stroke-width:1.5; fill:none; }
+  svg .lineg { stroke:#34d399; stroke-width:1.5; fill:none; }
+  svg .linew { stroke:#f59e0b; stroke-width:1.5; fill:none; stroke-dasharray:5 3; }
+  svg .lane { stroke:#475569; stroke-width:1; stroke-dasharray:4 4; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LangGraph4j Incident-Response Agent</h1>
+  <p>Ứng dụng Spring Boot 3 / Java 17 / Maven, trong đó một AI agent nhận cảnh báo hệ thống (ví dụ: "High CPU and connection pool exhaustion on payment-service"), điều tra, lập kế hoạch khắc phục, <strong>tạm dừng chờ con người phê duyệt trước bất kỳ lệnh nguy hiểm nào</strong>, thực thi bản vá rồi kiểm tra lại sự phục hồi theo vòng lặp. Trạng thái và dữ liệu được lưu trong Microsoft SQL Server (Docker Compose).</p>
+</header>
+<nav>
+  <a href="#stack">Công nghệ</a><a href="#structure">Cấu trúc</a><a href="#graph">Graph</a><a href="#nodes">Các node</a><a href="#state">State</a>
+  <a href="#llm">Tầng LLM</a><a href="#db">Cơ sở dữ liệu</a><a href="#checkpoint">Checkpoint</a><a href="#api">REST API</a><a href="#docker">Docker</a><a href="#tests">Kiểm thử</a><a href="#run">Chạy dự án</a>
+</nav>
+<main>
+
+<section id="stack">
+<h2>1. Công nghệ sử dụng</h2>
+<table>
+<tr><th>Thành phần</th><th>Vai trò</th></tr>
+<tr><td>Java 17, Maven</td><td>Ngôn ngữ / build (<code>pom.xml</code>)</td></tr>
+<tr><td>Spring Boot 3.3.5</td><td>Web (REST), dependency injection, JPA, cấu hình</td></tr>
+<tr><td>LangGraph4j 1.9.9 (<code>langgraph4j-core</code>)</td><td>Workflow của agent dưới dạng state graph, hỗ trợ interrupt và checkpoint</td></tr>
+<tr><td>Spring Data JPA + Hibernate</td><td>Entity / repository, tự tạo bảng (<code>ddl-auto: update</code>)</td></tr>
+<tr><td>SQL Server 2022 + <code>mssql-jdbc</code></td><td>Dữ liệu nghiệp vụ và checkpoint của graph</td></tr>
+<tr><td>Docker Compose</td><td>Chạy SQL Server và tạo database <code>sag</code></td></tr>
+<tr><td>JUnit 5 / SpringBootTest</td><td>Integration test chạy trên database thật</td></tr>
+</table>
+</section>
+
+<section id="structure">
+<h2>2. Cấu trúc dự án</h2>
+<pre>
+langraph-with-spring-manven/
+├── pom.xml                      Build Maven và các dependency
+├── docker-compose.yml           SQL Server 2022 + container khởi tạo DB chạy một lần
+├── lo-trinh.txt                 Lộ trình 4 milestone mà dự án triển khai
+├── README.md                    Hướng dẫn nhanh
+├── project-overview.html        Tài liệu này (tiếng Việt)
+├── project-overview.en.html     Bản tiếng Anh
+└── src/
+    ├── main/resources/application.yml
+    ├── main/java/com/example/demo/
+    │   ├── DemoApplication.java            Điểm khởi động Spring Boot
+    │   └── incident/
+    │       ├── IncidentController.java    Các endpoint REST
+    │       ├── IncidentService.java       Khởi chạy / tiếp tục (resume) graph
+    │       ├── domain/                    JPA entity, repository, tools
+    │       ├── llm/                       Hợp đồng LLM + các client
+    │       ├── graph/                     State, node, định nghĩa graph, trình giả lập
+    │       └── checkpoint/                Checkpoint saver lưu vào SQL Server
+    └── test/java/com/example/demo/IncidentFlowTest.java
+</pre>
+
+<h3>Kiến trúc tổng quan</h3>
+<figure class="diagram">
+<svg viewBox="0 0 900 430" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+  <text x="20" y="28" class="title">Client</text>
+  <rect class="box" x="20" y="38" width="170" height="50" rx="8"/>
+  <text x="105" y="68" text-anchor="middle">Operator / curl / UI</text>
+
+  <text x="250" y="28" class="title">Ứng dụng Spring Boot</text>
+  <rect x="240" y="38" width="440" height="372" rx="12" fill="none" stroke="#475569" stroke-dasharray="6 4"/>
+
+  <rect class="box" x="260" y="55" width="400" height="44" rx="8"/>
+  <text x="460" y="74" text-anchor="middle">IncidentController</text>
+  <text x="460" y="90" text-anchor="middle" class="sm">REST: /incidents, /approval, /audit</text>
+
+  <rect class="box" x="260" y="120" width="400" height="44" rx="8"/>
+  <text x="460" y="139" text-anchor="middle">IncidentService</text>
+  <text x="460" y="155" text-anchor="middle" class="sm">chạy graph · áp dụng quyết định của người · resume · đồng bộ trạng thái alert</text>
+
+  <rect class="boxw" x="260" y="185" width="400" height="95" rx="8"/>
+  <text x="460" y="205" text-anchor="middle">LangGraph4j CompiledGraph (IncidentGraphConfig)</text>
+  <text x="460" y="224" text-anchor="middle" class="sm">IncidentNodes · IncidentState · interruptBefore(approval_gate)</text>
+  <rect class="boxg" x="275" y="238" width="105" height="30" rx="6"/><text x="327" y="258" text-anchor="middle" class="sm">tra cứu song song</text>
+  <rect class="boxp" x="390" y="238" width="115" height="30" rx="6"/><text x="447" y="258" text-anchor="middle" class="sm">decide (LLM)</text>
+  <rect class="box" x="515" y="238" width="130" height="30" rx="6"/><text x="580" y="258" text-anchor="middle" class="sm">execute · verify</text>
+
+  <rect class="boxp" x="260" y="305" width="190" height="50" rx="8"/>
+  <text x="355" y="326" text-anchor="middle">DecisionService</text>
+  <text x="355" y="343" text-anchor="middle" class="sm">kiểm tra JSON nghiêm ngặt</text>
+  <rect class="box" x="470" y="305" width="190" height="50" rx="8"/>
+  <text x="565" y="326" text-anchor="middle">SimulatedEnvironment</text>
+  <text x="565" y="343" text-anchor="middle" class="sm">kubectl / psql giả lập</text>
+
+  <rect class="box" x="260" y="368" width="190" height="34" rx="8"/><text x="355" y="390" text-anchor="middle" class="sm">IncidentTools + Repositories</text>
+  <rect class="box" x="470" y="368" width="190" height="34" rx="8"/><text x="565" y="390" text-anchor="middle" class="sm">SqlServerCheckpointSaver</text>
+
+  <text x="730" y="28" class="title">Bên ngoài</text>
+  <rect class="boxp" x="720" y="305" width="160" height="50" rx="8"/>
+  <text x="800" y="326" text-anchor="middle">LLM</text>
+  <text x="800" y="343" text-anchor="middle" class="sm">OpenAI-compatible hoặc rule-based</text>
+  <rect class="boxg" x="720" y="368" width="160" height="34" rx="8"/><text x="800" y="390" text-anchor="middle">SQL Server (Docker)</text>
+
+  <path class="line" d="M190,63 H260" marker-end="url(#a1)"/>
+  <path class="line" d="M460,99 V120" marker-end="url(#a1)"/>
+  <path class="line" d="M460,164 V185" marker-end="url(#a1)"/>
+  <path class="line" d="M447,268 L380,305" marker-end="url(#a1)"/>
+  <path class="line" d="M580,268 L565,305" marker-end="url(#a1)"/>
+  <path class="line" d="M450,330 H720" marker-end="url(#a1)"/>
+  <path class="line" d="M355,355 V368" marker-end="url(#a1)"/>
+  <path class="lineg" d="M450,385 H720" marker-end="url(#a1)"/>
+  <path class="lineg" d="M660,385 H720"/>
+  <path class="lineg" d="M565,355 V368"/>
+</svg>
+<figcaption>Các tầng: REST → service → graph → thành phần hỗ trợ → LLM và SQL Server bên ngoài.</figcaption>
+</figure>
+</section>
+
+<section id="graph">
+<h2>3. Agent graph</h2>
+<div class="card">
+<div class="flow">
+  <span class="node">START</span><span class="arrow">→</span>
+  <span class="node">dispatch</span><span class="arrow">→ fan-out →</span>
+  <div class="par">
+    <span class="node">lookup_history</span>
+    <span class="node">lookup_runbooks</span>
+    <span class="node">scan_metrics</span>
+  </div>
+  <span class="arrow">→ fan-in →</span>
+  <span class="node">decide (LLM)</span><span class="arrow">→</span>
+  <span class="node gate">approval_gate ⏸ INTERRUPT</span><span class="arrow">→</span>
+  <span class="node">execute</span><span class="arrow">→</span>
+  <span class="node">verify</span><span class="arrow">→</span>
+  <span class="node">END</span>
+</div>
+<ul>
+  <li><strong>Điều tra song song:</strong> ba node lookup chạy trong cùng một superstep, mỗi node ghi vào một key state khác nhau và tạo audit row riêng.</li>
+  <li><strong>Định tuyến theo rủi ro:</strong> sau <code>decide</code>, rủi ro <span class="tag high">HIGH</span> đi qua <code>approval_gate</code>; <span class="tag low">LOW</span>/MEDIUM đi thẳng tới <code>execute</code>.</li>
+  <li><strong>Human in the loop:</strong> graph được compile với <code>interruptBefore("approval_gate")</code>. Graph dừng lại, lưu state và chờ. Nếu bị từ chối, incident kết thúc mà không thực thi gì.</li>
+  <li><strong>Vòng lặp thử lại:</strong> nếu <code>verify</code> thấy hệ thống vẫn chưa khỏe, graph quay lại <code>dispatch</code> (tối đa 3 lần, sau đó <code>ESCALATED</code>). Kế hoạch nguy hiểm mới sẽ yêu cầu phê duyệt lại.</li>
+</ul>
+</div>
+
+<figure class="diagram">
+<svg viewBox="0 0 920 470" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+    <marker id="a2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#34d399"/></marker>
+    <marker id="a2w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"/></marker>
+  </defs>
+  <rect class="box" x="10" y="190" width="70" height="36" rx="18"/><text x="45" y="213" text-anchor="middle">START</text>
+  <rect class="box" x="105" y="190" width="100" height="36" rx="8"/><text x="155" y="213" text-anchor="middle">dispatch</text>
+
+  <rect x="240" y="60" width="170" height="290" rx="10" fill="none" stroke="#34d399" stroke-dasharray="5 4"/>
+  <text x="325" y="52" text-anchor="middle" class="sm" style="fill:#34d399">cùng một superstep (song song)</text>
+  <rect class="boxg" x="255" y="85" width="140" height="44" rx="8"/><text x="325" y="105" text-anchor="middle">lookup_history</text><text x="325" y="120" text-anchor="middle" class="sm">AuditLogs</text>
+  <rect class="boxg" x="255" y="178" width="140" height="44" rx="8"/><text x="325" y="198" text-anchor="middle">lookup_runbooks</text><text x="325" y="213" text-anchor="middle" class="sm">Runbooks</text>
+  <rect class="boxg" x="255" y="271" width="140" height="44" rx="8"/><text x="325" y="291" text-anchor="middle">scan_metrics</text><text x="325" y="306" text-anchor="middle" class="sm">ServiceMetrics</text>
+
+  <rect class="boxp" x="450" y="186" width="120" height="44" rx="8"/><text x="510" y="206" text-anchor="middle">decide</text><text x="510" y="221" text-anchor="middle" class="sm">LLM → JSON</text>
+
+  <path d="M620,208 L670,188 L720,208 L670,228 Z" fill="#0b1220" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="670" y="212" text-anchor="middle" class="sm">risk HIGH?</text>
+
+  <rect class="boxw" x="605" y="80" width="130" height="50" rx="8"/><text x="670" y="102" text-anchor="middle">approval_gate</text><text x="670" y="119" text-anchor="middle" class="sm">⏸ INTERRUPT (người)</text>
+  <rect class="box" x="640" y="290" width="100" height="40" rx="8"/><text x="690" y="315" text-anchor="middle">execute</text>
+  <rect class="box" x="790" y="290" width="100" height="40" rx="8"/><text x="840" y="315" text-anchor="middle">verify</text>
+  <rect class="box" x="790" y="190" width="100" height="36" rx="18"/><text x="840" y="213" text-anchor="middle">END</text>
+  <rect class="box" x="790" y="90" width="100" height="36" rx="18"/><text x="840" y="113" text-anchor="middle">END</text>
+  <text x="840" y="82" text-anchor="middle" class="sm">(bị từ chối)</text>
+
+  <path class="line" d="M80,208 H105" marker-end="url(#a2)"/>
+  <path class="lineg" d="M205,208 C225,208 225,107 255,107" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M205,208 H255" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M205,208 C225,208 225,293 255,293" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M395,107 C430,107 430,200 450,200" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M395,200 H450" marker-end="url(#a2g)"/>
+  <path class="lineg" d="M395,293 C430,293 430,216 450,216" marker-end="url(#a2g)"/>
+  <path class="line" d="M570,208 H620" marker-end="url(#a2)"/>
+  <path class="linew" d="M670,188 V130" marker-end="url(#a2w)"/>
+  <text x="680" y="165" class="sm" style="fill:#f59e0b">có</text>
+  <path class="line" d="M670,228 V290" marker-end="url(#a2)"/>
+  <text x="680" y="262" class="sm">không</text>
+  <path class="linew" d="M735,105 C760,105 760,300 740,305" marker-end="url(#a2w)"/>
+  <text x="762" y="200" class="sm" style="fill:#f59e0b">đã duyệt</text>
+  <path class="line" d="M735,95 H790" marker-end="url(#a2)"/>
+  <text x="745" y="88" class="sm">từ chối</text>
+  <path class="line" d="M740,310 H790" marker-end="url(#a2)"/>
+  <path class="line" d="M840,290 V226" marker-end="url(#a2)"/>
+  <text x="850" y="262" class="sm">đã phục hồi / hết lượt thử</text>
+  <path class="line" d="M840,330 V420 H155 V226" marker-end="url(#a2)"/>
+  <text x="400" y="438" class="sm">chưa phục hồi và còn lượt thử → thử lại (quay về dispatch)</text>
+</svg>
+<figcaption>Toàn bộ graph. Xanh lá = nhánh song song, vàng cam = luồng chờ con người phê duyệt.</figcaption>
+</figure>
+
+<figure class="diagram">
+<svg viewBox="0 0 900 150" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+  <text x="450" y="20" text-anchor="middle" class="title">Vòng đời trạng thái của incident / alert</text>
+  <rect class="box" x="20" y="50" width="110" height="40" rx="20"/><text x="75" y="75" text-anchor="middle">OPEN</text>
+  <rect class="box" x="190" y="50" width="130" height="40" rx="20"/><text x="255" y="75" text-anchor="middle">INVESTIGATING</text>
+  <rect class="box" x="380" y="50" width="110" height="40" rx="20"/><text x="435" y="75" text-anchor="middle">PLANNED</text>
+  <rect class="boxw" x="550" y="50" width="130" height="40" rx="20"/><text x="615" y="75" text-anchor="middle">chờ phê duyệt</text>
+  <rect class="box" x="740" y="50" width="110" height="40" rx="20"/><text x="795" y="75" text-anchor="middle">EXECUTED</text>
+  <rect class="boxg" x="740" y="105" width="110" height="34" rx="17"/><text x="795" y="127" text-anchor="middle">RESOLVED</text>
+  <rect class="box" x="550" y="105" width="130" height="34" rx="17"/><text x="615" y="127" text-anchor="middle" class="sm">REJECTED / ESCALATED</text>
+  <path class="line" d="M130,70 H190" marker-end="url(#a3)"/>
+  <path class="line" d="M320,70 H380" marker-end="url(#a3)"/>
+  <path class="line" d="M490,70 H550" marker-end="url(#a3)"/>
+  <path class="line" d="M680,70 H740" marker-end="url(#a3)"/>
+  <path class="line" d="M795,90 V105" marker-end="url(#a3)"/>
+  <path class="line" d="M615,90 V105" marker-end="url(#a3)"/>
+</svg>
+<figcaption>RETRYING (không vẽ) đưa EXECUTED quay lại INVESTIGATING, tối đa 3 lần thử.</figcaption>
+</figure>
+</section>
+
+<section id="nodes">
+<h2>4. Các thành phần của graph (<code>incident/graph</code>)</h2>
+<table>
+<tr><th>Class / node</th><th>Trách nhiệm</th></tr>
+<tr><td><code>IncidentGraphConfig</code></td><td><code>@Configuration</code> của Spring, dựng và compile bean <code>StateGraph</code>: node, edge, định tuyến có điều kiện, interrupt, checkpoint saver.</td></tr>
+<tr><td><code>IncidentNodes</code></td><td>Chứa toàn bộ logic của các node (bên dưới), đồng thời ghi audit row vào DB.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>dispatch</code></td><td>Đánh dấu bắt đầu điều tra; điểm vào của mỗi vòng lặp.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>lookup_history</code></td><td>Tìm các hành động đã thực thi trước đây cho cùng service trong những incident cũ.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>lookup_runbooks</code></td><td>Nạp runbook của service từ bảng <code>Runbooks</code>.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>scan_metrics</code></td><td>Dùng tool <code>fetchServiceMetrics</code> và rút ra kết luận (CPU cao, pool cạn, rò rỉ kết nối).</td></tr>
+<tr><td>&nbsp;&nbsp;<code>decide</code></td><td>Dựng <code>DecisionContext</code>, hỏi LLM, tạo <code>RemediationStep</code>, tăng bộ đếm số lần thử.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>approval_gate</code></td><td>Chạy sau khi quyết định của con người được ghi vào state; ghi nhận APPROVED hoặc REJECTED.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>execute</code></td><td>Chạy hành động đã duyệt qua environment và ghi audit <code>EXECUTED_&lt;ACTION&gt;</code>.</td></tr>
+<tr><td>&nbsp;&nbsp;<code>verify</code></td><td>Đọc lại metrics mới nhất; khỏe nghĩa là CPU &lt; 70% và pool usage &lt; 70%. Đặt trạng thái RESOLVED / RETRYING / ESCALATED.</td></tr>
+<tr><td><code>SimulatedEnvironment</code></td><td>Thay thế cho kubectl/psql. Mỗi hành động thêm một dòng <code>ServiceMetrics</code> mới (scale out giảm một nửa CPU; kill session bị rò rỉ làm đầy lại; restart xóa rò rỉ). Cũng seed service lỗi và runbook ở alert đầu tiên.</td></tr>
+<tr><td><code>RemediationStep</code></td><td>Record serializable: <code>command</code>, <code>dangerous</code>, <code>reason</code>. Phải serializable để được checkpoint.</td></tr>
+</table>
+</section>
+
+<section id="state">
+<h2>5. State của graph (<code>IncidentState</code>)</h2>
+<p>Kế thừa <code>AgentState</code> của LangGraph4j; mỗi key là một channel trong <code>SCHEMA</code>.</p>
+<table>
+<tr><th>Key</th><th>Ý nghĩa</th></tr>
+<tr><td><code>incidentId</code>, <code>service</code>, <code>alert</code></td><td>Định danh incident (id bằng id dòng Alerts và cũng là thread id của checkpoint)</td></tr>
+<tr><td><code>findings</code>, <code>history</code>, <code>runbooks</code></td><td>Kết quả của ba lookup song song</td></tr>
+<tr><td><code>actionType</code>, <code>riskLevel</code>, <code>plan</code></td><td>Quyết định của LLM và bước khắc phục tương ứng</td></tr>
+<tr><td><code>approval</code></td><td>PENDING / APPROVED / REJECTED, do con người đặt</td></tr>
+<tr><td><code>attempt</code>, <code>recovered</code>, <code>status</code></td><td>Điều khiển vòng lặp và vòng đời</td></tr>
+<tr><td><code>timeline</code></td><td>Nhật ký chỉ-thêm-vào của mọi sự kiện (appender channel)</td></tr>
+</table>
+</section>
+
+<section id="llm">
+<h2>6. Tầng LLM (<code>incident/llm</code>)</h2>
+<table>
+<tr><th>Class</th><th>Trách nhiệm</th></tr>
+<tr><td><code>Decision</code></td><td>Hợp đồng JSON nghiêm ngặt: <code>action_type</code>, <code>target_service</code>, <code>risk_level</code>.</td></tr>
+<tr><td><code>ActionType</code></td><td>Enum: <code>SCALE_OUT</code>, <code>KILL_IDLE_SESSIONS</code>, <code>RESTART_SERVICE</code>, <code>NONE</code>, mỗi giá trị có một mẫu lệnh.</td></tr>
+<tr><td><code>RiskLevel</code></td><td>Enum: LOW, MEDIUM, HIGH.</td></tr>
+<tr><td><code>DecisionContext</code></td><td>Toàn bộ thông tin LLM được phép thấy: incident đang mở, metrics gần đây, hành động đã làm, runbook, cờ sức khỏe.</td></tr>
+<tr><td><code>LlmClient</code></td><td>Interface trả về JSON thô cho một context.</td></tr>
+<tr><td><code>RuleBasedLlm</code></td><td>Bản cài đặt dựa trên luật, chạy offline, được dùng khi chưa có API key.</td></tr>
+<tr><td><code>OpenAiLlm</code></td><td>Client <code>/chat/completions</code> tương thích OpenAI ở chế độ JSON, được dùng khi đặt <code>OPENAI_API_KEY</code>.</td></tr>
+<tr><td><code>DecisionService</code></td><td>Parse và kiểm tra JSON (field lạ, field thiếu, sai target service), thử lại một lần kèm thông báo lỗi.</td></tr>
+</table>
+</section>
+
+<section id="db">
+<h2>7. Cơ sở dữ liệu và domain (<code>incident/domain</code>)</h2>
+<table>
+<tr><th>Bảng / entity</th><th>Mục đích</th><th>Index</th></tr>
+<tr><td><code>Alerts</code> / <code>Alert</code></td><td>Các cảnh báo đến và trạng thái (OPEN, RESOLVED, REJECTED, ESCALATED)</td><td><code>(service_name, created_at)</code>, <code>status</code></td></tr>
+<tr><td><code>AuditLogs</code> / <code>AuditLog</code></td><td>Mọi hành động của node theo từng incident (ai/làm gì/khi nào)</td><td><code>alert_id</code>, <code>(service_name, created_at)</code></td></tr>
+<tr><td><code>Runbooks</code> / <code>Runbook</code></td><td>Hướng dẫn khắc phục theo từng service</td><td><code>service_name</code></td></tr>
+<tr><td><code>ServiceMetrics</code> / <code>ServiceMetric</code></td><td>Chuỗi thời gian CPU, pool usage, số replica, cờ rò rỉ</td><td><code>(service_name, created_at)</code></td></tr>
+<tr><td><code>lg_checkpoints</code></td><td>Checkpoint của LangGraph4j (do saver tạo, không qua JPA)</td><td>unique <code>(thread_id, seq DESC)</code></td></tr>
+</table>
+<figure class="diagram">
+<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+  <rect class="box" x="20" y="20" width="200" height="120" rx="8"/>
+  <text x="120" y="42" text-anchor="middle" class="title">Alerts</text>
+  <text x="32" y="64" class="sm">id (PK, IDENTITY)</text><text x="32" y="80" class="sm">service_name</text><text x="32" y="96" class="sm">message</text><text x="32" y="112" class="sm">status</text><text x="32" y="128" class="sm">created_at</text>
+
+  <rect class="box" x="350" y="20" width="200" height="120" rx="8"/>
+  <text x="450" y="42" text-anchor="middle" class="title">AuditLogs</text>
+  <text x="362" y="64" class="sm">id (PK, IDENTITY)</text><text x="362" y="80" class="sm">alert_id → Alerts.id</text><text x="362" y="96" class="sm">service_name · node · action</text><text x="362" y="112" class="sm">detail</text><text x="362" y="128" class="sm">created_at</text>
+
+  <rect class="box" x="680" y="20" width="200" height="104" rx="8"/>
+  <text x="780" y="42" text-anchor="middle" class="title">Runbooks</text>
+  <text x="692" y="64" class="sm">id (PK, IDENTITY)</text><text x="692" y="80" class="sm">service_name</text><text x="692" y="96" class="sm">action_type</text><text x="692" y="112" class="sm">instructions</text>
+
+  <rect class="box" x="20" y="175" width="230" height="120" rx="8"/>
+  <text x="135" y="197" text-anchor="middle" class="title">ServiceMetrics</text>
+  <text x="32" y="219" class="sm">id (PK, IDENTITY) · service_name</text><text x="32" y="235" class="sm">cpu_percent · pool_active · pool_max</text><text x="32" y="251" class="sm">replicas · connection_leak</text><text x="32" y="267" class="sm">created_at  (index: service_name, created_at)</text>
+
+  <rect class="boxw" x="350" y="175" width="300" height="120" rx="8"/>
+  <text x="500" y="197" text-anchor="middle" class="title">lg_checkpoints (LangGraph4j)</text>
+  <text x="362" y="219" class="sm">seq (IDENTITY) · thread_id = Alerts.id</text><text x="362" y="235" class="sm">checkpoint_id (PK cùng thread_id)</text><text x="362" y="251" class="sm">node_id · next_node_id</text><text x="362" y="267" class="sm">state (JSON) · saved_at</text>
+
+  <path class="line" d="M350,80 H220" marker-end="url(#a4)"/>
+  <text x="285" y="72" text-anchor="middle" class="sm">N : 1</text>
+  <path class="linew" d="M500,175 C500,160 150,160 120,140" stroke="#f59e0b" fill="none" stroke-dasharray="5 3" marker-end="url(#a4)"/>
+  <text x="330" y="158" class="sm">cùng id dùng làm thread</text>
+  <text x="780" y="150" text-anchor="middle" class="sm">Runbooks và ServiceMetrics liên kết qua service_name (không có FK)</text>
+</svg>
+<figcaption>Mô hình dữ liệu. Runbooks và metrics được tra theo tên service; audit row và checkpoint theo id incident.</figcaption>
+</figure>
+<p>Khóa chính dùng <code>IDENTITY</code> của SQL Server. Bốn interface <code>*Repository</code> là Spring Data JPA repository. <code>IncidentTools</code> cung cấp các tool cho agent là <code>queryActiveIncidents()</code> và <code>fetchServiceMetrics(service)</code>, đọc dữ liệu thật từ DB.</p>
+</section>
+
+<section id="checkpoint">
+<h2>8. Checkpoint bền vững (<code>SqlServerCheckpointSaver</code>)</h2>
+<div class="card">
+<ul>
+  <li>Kế thừa <code>AbstractCheckpointSaver</code> của LangGraph4j và lưu mỗi checkpoint thành một dòng trong <code>lg_checkpoints</code> (state được serialize vào <code>NVARCHAR(MAX)</code>).</li>
+  <li>Tự tạo bảng khi khởi động nếu chưa có.</li>
+  <li>Mỗi lần insert/update/delete chạy trong một transaction JDBC riêng (commit hoặc rollback), nên crash không để lại checkpoint ghi dở.</li>
+  <li>Vì state nằm trong database, incident đang tạm dừng vẫn sống sót qua lần khởi động lại ứng dụng và có thể tiếp tục bằng cách phê duyệt sau đó.</li>
+  <li>Graph được compile với <code>releaseThread(false)</code> để state cuối cùng vẫn đọc được sau khi chạy xong.</li>
+</ul>
+</div>
+</section>
+
+<section id="api">
+<h2>9. Service và REST API</h2>
+<p><code>IncidentService</code> lưu alert, seed môi trường giả lập, chạy graph (tiêu thụ stream đến khi END hoặc interrupt), áp dụng quyết định của con người bằng <code>updateState</code>, tiếp tục bằng <code>GraphInput.resume()</code> và đồng bộ trạng thái cuối về dòng <code>Alerts</code>.</p>
+<table>
+<tr><th>Method</th><th>Đường dẫn</th><th>Mô tả</th></tr>
+<tr><td>POST</td><td><code>/incidents</code></td><td>Body <code>{"serviceName","message"}</code>. Chạy đến khi xong hoặc dừng chờ phê duyệt.</td></tr>
+<tr><td>POST</td><td><code>/incidents/{id}/approval</code></td><td>Body <code>{"approved":true|false}</code>. Trả 409 nếu incident không ở trạng thái chờ.</td></tr>
+<tr><td>GET</td><td><code>/incidents/{id}</code></td><td>Trạng thái hiện tại, findings, plan, timeline, <code>awaitingApproval</code>.</td></tr>
+<tr><td>GET</td><td><code>/incidents/{id}/audit</code></td><td>Audit trail lấy từ database.</td></tr>
+</table>
+<figure class="diagram">
+<svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+  <text x="80" y="22" text-anchor="middle" class="title">Operator</text>
+  <text x="290" y="22" text-anchor="middle" class="title">API + Service</text>
+  <text x="520" y="22" text-anchor="middle" class="title">LangGraph4j</text>
+  <text x="720" y="22" text-anchor="middle" class="title">LLM</text>
+  <text x="840" y="22" text-anchor="middle" class="title">SQL Server</text>
+  <path class="lane" d="M80,30 V460"/><path class="lane" d="M290,30 V460"/><path class="lane" d="M520,30 V460"/><path class="lane" d="M720,30 V460"/><path class="lane" d="M840,30 V460"/>
+
+  <path class="line" d="M80,50 H290" marker-end="url(#a5)"/><text x="185" y="44" text-anchor="middle" class="sm">POST /incidents</text>
+  <path class="line" d="M290,72 H520" marker-end="url(#a5)"/><text x="405" y="66" text-anchor="middle" class="sm">chạy graph</text>
+  <path class="line" d="M520,94 H840" marker-end="url(#a5)"/><text x="680" y="88" text-anchor="middle" class="sm">tra cứu song song (đọc bảng, ghi audit)</text>
+  <path class="line" d="M520,120 H720" marker-end="url(#a5)"/><text x="620" y="114" text-anchor="middle" class="sm">decide → JSON</text>
+  <path class="line" d="M520,146 H840" marker-end="url(#a5)"/><text x="680" y="140" text-anchor="middle" class="sm">rủi ro LOW: execute, verify, checkpoint</text>
+  <path class="line" d="M520,172 H840" marker-end="url(#a5)"/><text x="680" y="166" text-anchor="middle" class="sm">thử lại: decide HIGH → lưu checkpoint</text>
+  <rect class="boxw" x="440" y="186" width="160" height="26" rx="6"/><text x="520" y="204" text-anchor="middle" class="sm">⏸ dừng tại approval_gate</text>
+  <path class="line" d="M290,226 H80" marker-end="url(#a5)"/><text x="185" y="220" text-anchor="middle" class="sm">awaitingApproval=true + plan</text>
+
+  <rect x="20" y="246" width="840" height="28" rx="6" fill="#3b0d0d" stroke="#f87171"/>
+  <text x="440" y="265" text-anchor="middle" style="fill:#f87171">(tùy chọn) ứng dụng crash / khởi động lại — state vẫn an toàn trong lg_checkpoints</text>
+
+  <path class="line" d="M80,300 H290" marker-end="url(#a5)"/><text x="185" y="294" text-anchor="middle" class="sm">POST /approval {approved:true}</text>
+  <path class="line" d="M290,322 H840" marker-end="url(#a5)"/><text x="565" y="316" text-anchor="middle" class="sm">updateState(APPROVED) — cập nhật checkpoint</text>
+  <path class="line" d="M290,348 H520" marker-end="url(#a5)"/><text x="405" y="342" text-anchor="middle" class="sm">resume()</text>
+  <path class="line" d="M520,374 H840" marker-end="url(#a5)"/><text x="680" y="368" text-anchor="middle" class="sm">execute → audit → verify → checkpoint</text>
+  <path class="line" d="M290,400 H840" marker-end="url(#a5)"/><text x="565" y="394" text-anchor="middle" class="sm">đồng bộ Alerts.status (RESOLVED / …)</text>
+  <path class="line" d="M290,432 H80" marker-end="url(#a5)"/><text x="185" y="426" text-anchor="middle" class="sm">trạng thái cuối hoặc yêu cầu duyệt tiếp</text>
+</svg>
+<figcaption>Chuỗi request, gồm bước dừng chờ con người phê duyệt và một lần crash/khởi động lại ở giữa.</figcaption>
+</figure>
+
+<h3>Kịch bản điển hình</h3>
+<pre>
+1. POST /incidents                -> lần 1: SCALE_OUT (LOW) tự chạy, hệ thống vẫn chưa khỏe
+                                    lần 2: KILL_IDLE_SESSIONS (HIGH) -> tạm dừng, awaitingApproval=true
+2. POST /incidents/{id}/approval  -> thực thi; rò rỉ làm đầy lại pool -> lần 3: RESTART_SERVICE (HIGH) -> dừng lần nữa
+3. POST /incidents/{id}/approval  -> restart xóa rò rỉ -> verify OK -> trạng thái RESOLVED
+</pre>
+</section>
+
+<section id="docker">
+<h2>10. Cấu hình và Docker</h2>
+<ul>
+  <li><code>docker-compose.yml</code>: service <code>mssql</code> (SQL Server 2022, healthcheck, volume bền vững <code>mssql_data</code>, cổng host mặc định <code>1434</code> qua <code>MSSQL_PORT</code>) và <code>mssql-init</code> chạy một lần để tạo <code>sag</code> khi DB đã healthy.</li>
+  <li><code>application.yml</code>: JDBC URL với <code>encrypt=true;trustServerCertificate=true</code>, kích thước pool Hikari, <code>ddl-auto: update</code>, <code>incident.max-attempts</code> và cấu hình LLM (<code>base-url</code>, <code>api-key</code>, <code>model</code>).</li>
+  <li>Biến môi trường ghi đè: <code>MSSQL_HOST</code>, <code>MSSQL_PORT</code>, <code>MSSQL_SA_PASSWORD</code>, <code>OPENAI_API_KEY</code>. Mật khẩu SA mặc định chỉ dành cho môi trường phát triển cục bộ.</li>
+</ul>
+</section>
+
+<section id="tests">
+<h2>11. Kiểm thử (<code>IncidentFlowTest</code>)</h2>
+<ul>
+  <li><strong>Vòng lặp đầy đủ có phê duyệt:</strong> dừng lại, có dòng checkpoint, duyệt hai lần, kết thúc RESOLVED, audit hiển thị cả ba hành động đã thực thi.</li>
+  <li><strong>Từ chối:</strong> lệnh nguy hiểm không bao giờ được thực thi và phê duyệt thêm sẽ trả lỗi.</li>
+  <li><strong>Nhánh song song:</strong> cả ba node lookup đều ghi audit row.</li>
+</ul>
+<p>Đây là integration test nên cần container SQL Server đang chạy.</p>
+</section>
+
+<section id="run">
+<h2>12. Cách chạy</h2>
+<pre>
+docker compose up -d
+mvn test
+mvn spring-boot:run        # http://localhost:8080
+</pre>
+<h3>Hạn chế</h3>
+<ul>
+  <li>Các hành động hạ tầng chỉ là giả lập; hãy thay <code>SimulatedEnvironment</code> bằng executor thật khi dùng production.</li>
+  <li>LangGraph4j không có API <code>Send</code>, nên song song hóa được thực hiện bằng nhiều edge đi ra.</li>
+  <li>Đường OpenAI chưa được kiểm thử vì không có API key; chưa có stress test về deadlock.</li>
+</ul>
+</section>
+
+</main>
+</body>
+</html>

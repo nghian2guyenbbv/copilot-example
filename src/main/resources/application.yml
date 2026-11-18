@@ -1,0 +1,15 @@
+server:
+  port: 8080
+
+spring:
+  ai:
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:}
+        chat:
+          options:
+            model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
+    mcp:
+      server:
+        name: order-mcp-server
+        version: 1.0.0

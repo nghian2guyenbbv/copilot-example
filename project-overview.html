@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Order MCP Server</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; max-width: 980px; margin: 30px auto; padding: 0 16px; color: #222; line-height: 1.5; }
+  h1 { border-bottom: 3px solid #4a6cf7; padding-bottom: 6px; }
+  h2 { margin-top: 36px; color: #2a3f9e; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid #ccd; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #eef1ff; }
+  code, pre { background: #f4f4f8; border-radius: 4px; }
+  code { padding: 1px 5px; }
+  pre { padding: 12px; overflow-x: auto; }
+  .diagram { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
+  .box { border: 2px solid #4a6cf7; border-radius: 8px; padding: 10px 14px; background: #f7f8ff; text-align: center; min-width: 130px; }
+  .box small { display: block; color: #555; }
+  .box.mcp { background: #e6f7ea; border-color: #2e9d4f; }
+  .arrow { font-size: 22px; color: #4a6cf7; }
+  .flow { border-left: 4px solid #4a6cf7; padding-left: 14px; margin: 14px 0; }
+</style>
+</head>
+<body>
+
+<h1>Order MCP Server</h1>
+<p>A simple <strong>Model Context Protocol (MCP)</strong> server built with <strong>Java 17, Spring Boot 3.3 and Spring AI</strong>.
+It exposes two existing order APIs (search and create) as MCP tools so an AI assistant can call them from natural language.</p>
+
+<h2>1. Architecture</h2>
+<div class="diagram">
+  <div class="box">User<small>"find order 123, then create an order"</small></div>
+  <span class="arrow">&rarr;</span>
+  <div class="box">AI client<small>Copilot / Claude (LLM picks tools)</small></div>
+  <span class="arrow">&rarr;</span>
+  <div class="box mcp">MCP Server<small>SSE <code>/sse</code><br>tools: searchOrder, createOrder</small></div>
+  <span class="arrow">&rarr;</span>
+  <div class="box">REST API<small>GET / POST <code>/api/orders</code></small></div>
+  <span class="arrow">&rarr;</span>
+  <div class="box">OrderService<small>in-memory store</small></div>
+</div>
+
+<h2>2. How the MCP "knows" which API to call</h2>
+<p>The server does not parse the user's sentence. Each API is published as a tool with a name, a description and a parameter schema.
+The LLM in the client reads these descriptions and decides which tool to call and with which arguments.</p>
+
+<div class="flow">
+  <strong>Prompt:</strong> "find the order 123, and create an order"<br>
+  1. LLM matches "find ... order 123" &rarr; calls <code>searchOrder(orderId=123)</code><br>
+  2. LLM matches "create an order" &rarr; asks for / fills customer, product, quantity &rarr; calls <code>createOrder(...)</code><br>
+  3. LLM summarizes both results for the user
+</div>
+
+<h2>3. MCP tools</h2>
+<table>
+  <tr><th>Tool</th><th>Triggered by</th><th>Parameters</th><th>Calls API</th><th>Returns</th></tr>
+  <tr><td><code>searchOrder</code></td><td>"find / show / get order 123"</td><td><code>orderId</code> (long)</td><td><code>GET /api/orders/{id}</code></td><td>Order, or "not found" message</td></tr>
+  <tr><td><code>createOrder</code></td><td>"create / place an order"</td><td><code>customerName</code>, <code>product</code>, <code>quantity</code></td><td><code>POST /api/orders</code></td><td>Created order with generated ID</td></tr>
+</table>
+
+<h2>4. REST APIs (existing APIs)</h2>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Body</th><th>Response</th></tr>
+  <tr><td>GET</td><td><code>/api/orders/{id}</code></td><td>-</td><td>200 Order / 404</td></tr>
+  <tr><td>POST</td><td><code>/api/orders</code></td><td><code>{"customerName","product","quantity"}</code></td><td>201 Order</td></tr>
+</table>
+
+<h2>5. Project structure</h2>
+<table>
+  <tr><th>File</th><th>Role</th></tr>
+  <tr><td><code>pom.xml</code></td><td>Spring Boot parent, Spring AI BOM, <code>spring-ai-starter-mcp-server-webmvc</code></td></tr>
+  <tr><td><code>OrderMcpApplication</code></td><td>Entry point; registers <code>OrderTools</code> as MCP tools</td></tr>
+  <tr><td><code>tool/OrderTools</code></td><td><code>@Tool</code> methods that wrap the REST APIs via <code>RestClient</code></td></tr>
+  <tr><td><code>controller/OrderController</code></td><td>REST endpoints (search, create)</td></tr>
+  <tr><td><code>controller/ChatController</code></td><td><code>POST /chat</code>: built-in chat agent. Sends the message to Gemini with the order tools, so the LLM picks the tool</td></tr>
+  <tr><td><code>service/OrderService</code></td><td>In-memory store, seeded with order 123</td></tr>
+  <tr><td><code>model/Order, CreateOrderRequest</code></td><td>Java records</td></tr>
+  <tr><td><code>application.yml</code></td><td>Port 8080, MCP server name/version, Gemini settings (key from <code>GEMINI_API_KEY</code>)</td></tr>
+</table>
+
+<h2>6. Run it</h2>
+<pre>mvn package
+java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
+<p>MCP endpoint (SSE): <code>http://localhost:8080/sse</code></p>
+<p>Or with Docker (host port <strong>9001</strong> &rarr; container 8080):</p>
+<pre>docker compose up --build</pre>
+<p>MCP endpoint (SSE): <code>http://localhost:9001/sse</code></p>
+
+<h2>7. Connect a client</h2>
+<p>Example <code>mcp.json</code> / client config:</p>
+<pre>{
+  "mcpServers": {
+    "order-mcp-server": {
+      "type": "sse",
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}</pre>
+<p>When running in Docker, use <code>http://localhost:9001/sse</code> instead.</p>
+<p>Then ask: <em>"Find the order 123, and create an order for Bob, 2 Phones."</em></p>
+
+<h2>8. Step-by-step: how this project was built (and why)</h2>
+<table>
+  <tr><th>#</th><th>Step</th><th>What we did</th><th>Why</th></tr>
+  <tr><td>1</td><td>Create the Maven project</td><td><code>pom.xml</code> with Spring Boot 3.3 parent, Spring AI BOM and <code>spring-ai-starter-mcp-server-webmvc</code>.</td>
+      <td>The starter auto-configures the MCP protocol, SSE transport and tool registration, so we write no protocol code. The BOM keeps Spring AI versions consistent. Java 17 is Spring Boot 3's minimum.</td></tr>
+  <tr><td>2</td><td>Add the application class</td><td><code>OrderMcpApplication</code> with a <code>ToolCallbackProvider</code> bean built from <code>OrderTools</code>.</td>
+      <td>MCP only exposes tools that are registered. The bean is what turns <code>@Tool</code> methods into MCP tools.</td></tr>
+  <tr><td>3</td><td>Define the models</td><td><code>Order</code> and <code>CreateOrderRequest</code> as Java records.</td>
+      <td>Records are short, immutable and serialize to JSON directly. They give the API and tools a shared, typed contract.</td></tr>
+  <tr><td>4</td><td>Add the service</td><td><code>OrderService</code> with an in-memory map, seeded with order 123.</td>
+      <td>Stands in for a real database so the example stays simple, and gives us data to search right away.</td></tr>
+  <tr><td>5</td><td>Add the REST controller</td><td><code>GET /api/orders/{id}</code> and <code>POST /api/orders</code>.</td>
+      <td>These are the "existing APIs" the MCP must cover. Keeping them as normal REST means other clients can use them too, and the MCP is just a thin layer on top.</td></tr>
+  <tr><td>6</td><td>Write the MCP tools</td><td><code>OrderTools</code>: <code>searchOrder</code> and <code>createOrder</code> annotated with <code>@Tool</code> and <code>@ToolParam</code>, calling the REST APIs via <code>RestClient</code>.</td>
+      <td>This is the heart of the project. The tool <em>description</em> is what the LLM reads to decide which API fits the request, so descriptions are written around user phrasing ("find order", "create an order"). Calling REST rather than the service keeps the MCP valid for a separate order service later.</td></tr>
+  <tr><td>7</td><td>Return typed results</td><td><code>searchOrder</code> returns <code>OrderSearchResult(found, order, message)</code>, not <code>Object</code>.</td>
+      <td>Spring AI silently ignores tool methods with a generic/functional return type. A typed result also lets the LLM tell "not found" apart from an error.</td></tr>
+  <tr><td>8</td><td>Minimal configuration</td><td><code>application.yml</code>: port 8080, MCP name and version.</td>
+      <td>Defaults cover everything else (SSE at <code>/sse</code>). The name and version only make the server identifiable in clients.</td></tr>
+  <tr><td>9</td><td>Build and test</td><td><code>mvn package</code>, then call the tools over the SSE endpoint (<code>tools/call</code>).</td>
+      <td>Proves the tools are registered and return correct data, independent of any AI client. This is how we caught the ignored-tool problem in step 7.</td></tr>
+  <tr><td>10</td><td>Containerize</td><td><code>Dockerfile</code> (multi-stage) and <code>docker-compose.yml</code> mapping <code>9001:8080</code>.</td>
+      <td>Makes it runnable anywhere without installing Java or Maven. The multi-stage build keeps the final image small. Host port 9001 avoids clashes with other local services on 8080.</td></tr>
+  <tr><td>11</td><td>Connect a client</td><td>Add the SSE URL to the client's MCP config and try the sample prompt.</td>
+      <td>The client's LLM discovers the tools via <code>tools/list</code> and chooses which to call, so no routing logic is needed on the server.</td></tr>
+</table>
+
+<h2>9. How to test</h2>
+<p>Use <code>8080</code> when running with <code>java -jar</code>, or <code>9001</code> when running with Docker. Examples below use 9001. In Postman: <em>Import &rarr; Raw text</em> and paste any <code>curl</code> command below.</p>
+
+<h3>9.1 Test the REST APIs</h3>
+<table>
+  <tr><th>Test</th><th>cURL</th><th>Expected</th></tr>
+  <tr><td>Search existing order</td><td><pre>curl http://localhost:9001/api/orders/123</pre></td><td>200 with order 123 (Alice, Laptop)</td></tr>
+  <tr><td>Search missing order</td><td><pre>curl -i http://localhost:9001/api/orders/999</pre></td><td>404</td></tr>
+  <tr><td>Create order</td><td><pre>curl -X POST http://localhost:9001/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customerName":"Bob","product":"Phone","quantity":2}'</pre></td><td>201 with new order (id 124, 125, ...)</td></tr>
+</table>
+<p><strong>Windows PowerShell:</strong> <code>curl</code> is an alias, so use <code>curl.exe</code>, or <code>Invoke-RestMethod</code>:</p>
+<pre>Invoke-RestMethod -Method Post http://localhost:9001/api/orders `
+  -ContentType application/json `
+  -Body '{"customerName":"Bob","product":"Phone","quantity":2}'</pre>
+
+<h3>9.2 Test the MCP tools (SSE transport)</h3>
+<p>MCP over SSE uses two connections: keep the SSE stream open to receive responses, and POST requests to the session endpoint.
+In Postman, create a <em>GET</em> request to <code>/sse</code> (keeps streaming) and send the POSTs from a second request.</p>
+<ol>
+  <li><strong>Open the stream</strong> (terminal 1, leave it running). It prints an endpoint such as <code>/mcp/message?sessionId=abc-123</code>:
+<pre>curl -N http://localhost:9001/sse</pre></li>
+  <li><strong>Initialize</strong> (terminal 2; replace the sessionId):
+<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
+
+curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'</pre></li>
+  <li><strong>List tools</strong> (expect <code>searchOrder</code> and <code>createOrder</code>):
+<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'</pre></li>
+  <li><strong>Call searchOrder</strong>:
+<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"searchOrder","arguments":{"orderId":123}}}'</pre></li>
+  <li><strong>Call createOrder</strong>:
+<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"createOrder","arguments":{"customerName":"Bob","product":"Phone","quantity":2}}}'</pre></li>
+</ol>
+<p>The POST itself returns <code>Accepted</code>; the JSON-RPC results appear in the terminal 1 stream.
+Expected for <code>searchOrder</code> 123: <code>{"found":true,"order":{...},"message":"Order found"}</code>; for an unknown ID: <code>found:false</code>.</p>
+
+<h3>9.3 Test with the built-in chat agent (<code>POST /chat</code>)</h3>
+<p>This is the easiest way to try the "natural language &rarr; right API" flow. The server sends your sentence to <strong>Gemini</strong> together with the
+<code>searchOrder</code> and <code>createOrder</code> tools. Gemini decides which to call, the server runs them, and Gemini returns the final answer.</p>
+<p><strong>Prerequisite:</strong> a Gemini API key from Google AI Studio, set before starting the app:</p>
+<pre># PowerShell
+$env:GEMINI_API_KEY="your-key"
+java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar
+
+# Docker (key is read from your shell or a .env file)
+docker compose up --build</pre>
+<p>In IntelliJ, set <code>GEMINI_API_KEY</code> under Run Configuration &rarr; Environment variables. With an empty key the chat call fails with an authentication error.</p>
+
+<table>
+  <tr><th>Scenario</th><th>cURL (Linux / macOS / Git Bash / Postman import)</th><th>Expected</th></tr>
+  <tr><td>Search and create in one message</td>
+      <td><pre>curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Find the order 123, and create an order for Bob, 2 Phones"}'</pre></td>
+      <td>Calls <code>searchOrder(123)</code> then <code>createOrder(Bob, Phone, 2)</code>. The reply summarizes order 123 and the new order ID</td></tr>
+  <tr><td>Search only</td>
+      <td><pre>curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Find the order 123"}'</pre></td>
+      <td>Calls only <code>searchOrder</code></td></tr>
+  <tr><td>Order not found</td>
+      <td><pre>curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Find the order 999"}'</pre></td>
+      <td>Reply says order 999 was not found</td></tr>
+  <tr><td>Create only</td>
+      <td><pre>curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Create an order for Anna, 3 Keyboards"}'</pre></td>
+      <td>Calls only <code>createOrder</code></td></tr>
+  <tr><td>Missing details</td>
+      <td><pre>curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Create an order"}'</pre></td>
+      <td>Asks for customer name, product and quantity instead of guessing</td></tr>
+</table>
+
+<p><strong>Windows PowerShell</strong> (plain <code>curl</code> is an alias, and quote escaping differs):</p>
+<pre>Invoke-RestMethod -Method Post http://localhost:8080/chat `
+  -ContentType application/json `
+  -Body '{"message":"Find the order 123, and create an order for Bob, 2 Phones"}'
+
+# or with curl.exe, using a body file to avoid escaping problems
+'{"message":"Find the order 123, and create an order for Bob, 2 Phones"}' | Set-Content body.json
+curl.exe -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "@body.json"</pre>
+
+<p><strong>Postman:</strong> <code>POST http://localhost:8080/chat</code> &rarr; Body &rarr; raw &rarr; JSON &rarr; <code>{"message":"Find the order 123, and create an order for Bob, 2 Phones"}</code>.
+Use port <code>9001</code> if running in Docker.</p>
+<p><strong>Response format:</strong> <code>{"reply":"Order 123 belongs to Alice (1 Laptop, CREATED). I created order 124 for Bob: 2 Phones."}</code>
+(wording varies, since Gemini writes it).</p>
+<p><strong>Verify the tools were used:</strong> the new order ID (124, 125, ...) in the reply, and a follow-up <code>curl http://localhost:8080/api/orders/124</code> returning that order.</p>
+
+<h3>9.4 Test with an external AI client</h3>
+<p>Add the SSE URL to your client, then ask: <em>"Find the order 123, and create an order for Bob, 2 Phones."</em>
+Check that the client calls <code>searchOrder</code> first, then <code>createOrder</code>.
+Alternatively use the MCP Inspector: <code>npx @modelcontextprotocol/inspector</code> &rarr; transport SSE &rarr; URL <code>http://localhost:9001/sse</code>.</p>
+
+<h2>10. Notes</h2>
+<ul>
+  <li>Data is in memory and resets on restart; the API is a stand-in for a real order service.</li>
+  <li>To target a separate order service, set <code>order.api.base-url</code> (default: this app).</li>
+</ul>
+
+</body>
+</html>

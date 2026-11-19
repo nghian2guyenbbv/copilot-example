@@ -3,7 +3,7 @@ services:
     build: .
     container_name: order-mcp-server
     ports:
-      - "9001:8080"
+      - "9004:8080"
     restart: unless-stopped
     environment:
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY:

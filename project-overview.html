@@ -72,19 +72,19 @@ The LLM in the client reads these descriptions and decides which tool to call an
   <tr><td><code>OrderMcpApplication</code></td><td>Entry point; registers <code>OrderTools</code> as MCP tools</td></tr>
   <tr><td><code>tool/OrderTools</code></td><td><code>@Tool</code> methods that wrap the REST APIs via <code>RestClient</code></td></tr>
   <tr><td><code>controller/OrderController</code></td><td>REST endpoints (search, create)</td></tr>
-  <tr><td><code>controller/ChatController</code></td><td><code>POST /chat</code>: built-in chat agent. Sends the message to Gemini with the order tools, so the LLM picks the tool</td></tr>
+  <tr><td><code>controller/ChatController</code></td><td><code>POST /chat</code>: built-in chat agent. Sends the message to OpenAI with the order tools, so the LLM picks the tool</td></tr>
   <tr><td><code>service/OrderService</code></td><td>In-memory store, seeded with order 123</td></tr>
   <tr><td><code>model/Order, CreateOrderRequest</code></td><td>Java records</td></tr>
-  <tr><td><code>application.yml</code></td><td>Port 8080, MCP server name/version, Gemini settings (key from <code>GEMINI_API_KEY</code>)</td></tr>
+  <tr><td><code>application.yml</code></td><td>Port 8080, MCP server name/version, OpenAI settings (key from <code>OPENAI_API_KEY</code>)</td></tr>
 </table>
 
 <h2>6. Run it</h2>
 <pre>mvn package
 java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
 <p>MCP endpoint (SSE): <code>http://localhost:8080/sse</code></p>
-<p>Or with Docker (host port <strong>9001</strong> &rarr; container 8080):</p>
+<p>Or with Docker (host port <strong>9004</strong> &rarr; container 8080):</p>
 <pre>docker compose up --build</pre>
-<p>MCP endpoint (SSE): <code>http://localhost:9001/sse</code></p>
+<p>MCP endpoint (SSE): <code>http://localhost:9004/sse</code></p>
 
 <h2>7. Connect a client</h2>
 <p>Example <code>mcp.json</code> / client config:</p>
@@ -96,7 +96,7 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
     }
   }
 }</pre>
-<p>When running in Docker, use <code>http://localhost:9001/sse</code> instead.</p>
+<p>When running in Docker, use <code>http://localhost:9004/sse</code> instead.</p>
 <p>Then ask: <em>"Find the order 123, and create an order for Bob, 2 Phones."</em></p>
 
 <h2>8. Step-by-step: how this project was built (and why)</h2>
@@ -120,26 +120,26 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
       <td>Defaults cover everything else (SSE at <code>/sse</code>). The name and version only make the server identifiable in clients.</td></tr>
   <tr><td>9</td><td>Build and test</td><td><code>mvn package</code>, then call the tools over the SSE endpoint (<code>tools/call</code>).</td>
       <td>Proves the tools are registered and return correct data, independent of any AI client. This is how we caught the ignored-tool problem in step 7.</td></tr>
-  <tr><td>10</td><td>Containerize</td><td><code>Dockerfile</code> (multi-stage) and <code>docker-compose.yml</code> mapping <code>9001:8080</code>.</td>
-      <td>Makes it runnable anywhere without installing Java or Maven. The multi-stage build keeps the final image small. Host port 9001 avoids clashes with other local services on 8080.</td></tr>
+  <tr><td>10</td><td>Containerize</td><td><code>Dockerfile</code> (multi-stage) and <code>docker-compose.yml</code> mapping <code>9004:8080</code>.</td>
+      <td>Makes it runnable anywhere without installing Java or Maven. The multi-stage build keeps the final image small. Host port 9004 avoids clashes with other local services on 8080.</td></tr>
   <tr><td>11</td><td>Connect a client</td><td>Add the SSE URL to the client's MCP config and try the sample prompt.</td>
       <td>The client's LLM discovers the tools via <code>tools/list</code> and chooses which to call, so no routing logic is needed on the server.</td></tr>
 </table>
 
 <h2>9. How to test</h2>
-<p>Use <code>8080</code> when running with <code>java -jar</code>, or <code>9001</code> when running with Docker. Examples below use 9001. In Postman: <em>Import &rarr; Raw text</em> and paste any <code>curl</code> command below.</p>
+<p>Use <code>8080</code> when running with <code>java -jar</code>, or <code>9004</code> when running with Docker. Examples below use 9004. In Postman: <em>Import &rarr; Raw text</em> and paste any <code>curl</code> command below.</p>
 
 <h3>9.1 Test the REST APIs</h3>
 <table>
   <tr><th>Test</th><th>cURL</th><th>Expected</th></tr>
-  <tr><td>Search existing order</td><td><pre>curl http://localhost:9001/api/orders/123</pre></td><td>200 with order 123 (Alice, Laptop)</td></tr>
-  <tr><td>Search missing order</td><td><pre>curl -i http://localhost:9001/api/orders/999</pre></td><td>404</td></tr>
-  <tr><td>Create order</td><td><pre>curl -X POST http://localhost:9001/api/orders \
+  <tr><td>Search existing order</td><td><pre>curl http://localhost:9004/api/orders/123</pre></td><td>200 with order 123 (Alice, Laptop)</td></tr>
+  <tr><td>Search missing order</td><td><pre>curl -i http://localhost:9004/api/orders/999</pre></td><td>404</td></tr>
+  <tr><td>Create order</td><td><pre>curl -X POST http://localhost:9004/api/orders \
   -H "Content-Type: application/json" \
   -d '{"customerName":"Bob","product":"Phone","quantity":2}'</pre></td><td>201 with new order (id 124, 125, ...)</td></tr>
 </table>
 <p><strong>Windows PowerShell:</strong> <code>curl</code> is an alias, so use <code>curl.exe</code>, or <code>Invoke-RestMethod</code>:</p>
-<pre>Invoke-RestMethod -Method Post http://localhost:9001/api/orders `
+<pre>Invoke-RestMethod -Method Post http://localhost:9004/api/orders `
   -ContentType application/json `
   -Body '{"customerName":"Bob","product":"Phone","quantity":2}'</pre>
 
@@ -148,25 +148,25 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
 In Postman, create a <em>GET</em> request to <code>/sse</code> (keeps streaming) and send the POSTs from a second request.</p>
 <ol>
   <li><strong>Open the stream</strong> (terminal 1, leave it running). It prints an endpoint such as <code>/mcp/message?sessionId=abc-123</code>:
-<pre>curl -N http://localhost:9001/sse</pre></li>
+<pre>curl -N http://localhost:9004/sse</pre></li>
   <li><strong>Initialize</strong> (terminal 2; replace the sessionId):
-<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 
-curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'</pre></li>
   <li><strong>List tools</strong> (expect <code>searchOrder</code> and <code>createOrder</code>):
-<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'</pre></li>
   <li><strong>Call searchOrder</strong>:
-<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"searchOrder","arguments":{"orderId":123}}}'</pre></li>
   <li><strong>Call createOrder</strong>:
-<pre>curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
+<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"createOrder","arguments":{"customerName":"Bob","product":"Phone","quantity":2}}}'</pre></li>
 </ol>
@@ -174,16 +174,16 @@ curl -X POST "http://localhost:9001/mcp/message?sessionId=abc-123" \
 Expected for <code>searchOrder</code> 123: <code>{"found":true,"order":{...},"message":"Order found"}</code>; for an unknown ID: <code>found:false</code>.</p>
 
 <h3>9.3 Test with the built-in chat agent (<code>POST /chat</code>)</h3>
-<p>This is the easiest way to try the "natural language &rarr; right API" flow. The server sends your sentence to <strong>Gemini</strong> together with the
-<code>searchOrder</code> and <code>createOrder</code> tools. Gemini decides which to call, the server runs them, and Gemini returns the final answer.</p>
-<p><strong>Prerequisite:</strong> a Gemini API key from Google AI Studio, set before starting the app:</p>
+<p>This is the easiest way to try the "natural language &rarr; right API" flow. The server sends your sentence to <strong>OpenAI</strong> together with the
+<code>searchOrder</code> and <code>createOrder</code> tools. OpenAI decides which to call, the server runs them, and OpenAI returns the final answer.</p>
+<p><strong>Prerequisite:</strong> an OpenAI API key (platform.openai.com), set before starting the app:</p>
 <pre># PowerShell
-$env:GEMINI_API_KEY="your-key"
+$env:OPENAI_API_KEY="your-key"
 java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar
 
 # Docker (key is read from your shell or a .env file)
 docker compose up --build</pre>
-<p>In IntelliJ, set <code>GEMINI_API_KEY</code> under Run Configuration &rarr; Environment variables. With an empty key the chat call fails with an authentication error.</p>
+<p>In IntelliJ, set <code>OPENAI_API_KEY</code> under Run Configuration &rarr; Environment variables. With an empty key the chat call fails with an authentication error.</p>
 
 <table>
   <tr><th>Scenario</th><th>cURL (Linux / macOS / Git Bash / Postman import)</th><th>Expected</th></tr>
@@ -224,15 +224,15 @@ docker compose up --build</pre>
 curl.exe -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "@body.json"</pre>
 
 <p><strong>Postman:</strong> <code>POST http://localhost:8080/chat</code> &rarr; Body &rarr; raw &rarr; JSON &rarr; <code>{"message":"Find the order 123, and create an order for Bob, 2 Phones"}</code>.
-Use port <code>9001</code> if running in Docker.</p>
+Use port <code>9004</code> if running in Docker.</p>
 <p><strong>Response format:</strong> <code>{"reply":"Order 123 belongs to Alice (1 Laptop, CREATED). I created order 124 for Bob: 2 Phones."}</code>
-(wording varies, since Gemini writes it).</p>
+(wording varies, since OpenAI writes it).</p>
 <p><strong>Verify the tools were used:</strong> the new order ID (124, 125, ...) in the reply, and a follow-up <code>curl http://localhost:8080/api/orders/124</code> returning that order.</p>
 
 <h3>9.4 Test with an external AI client</h3>
 <p>Add the SSE URL to your client, then ask: <em>"Find the order 123, and create an order for Bob, 2 Phones."</em>
 Check that the client calls <code>searchOrder</code> first, then <code>createOrder</code>.
-Alternatively use the MCP Inspector: <code>npx @modelcontextprotocol/inspector</code> &rarr; transport SSE &rarr; URL <code>http://localhost:9001/sse</code>.</p>
+Alternatively use the MCP Inspector: <code>npx @modelcontextprotocol/inspector</code> &rarr; transport SSE &rarr; URL <code>http://localhost:9004/sse</code>.</p>
 
 <h2>10. Notes</h2>
 <ul>

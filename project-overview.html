@@ -72,10 +72,9 @@ The LLM in the client reads these descriptions and decides which tool to call an
   <tr><td><code>OrderMcpApplication</code></td><td>Entry point; registers <code>OrderTools</code> as MCP tools</td></tr>
   <tr><td><code>tool/OrderTools</code></td><td><code>@Tool</code> methods that wrap the REST APIs via <code>RestClient</code></td></tr>
   <tr><td><code>controller/OrderController</code></td><td>REST endpoints (search, create)</td></tr>
-  <tr><td><code>controller/ChatController</code></td><td><code>POST /chat</code>: built-in chat agent. Sends the message to OpenAI with the order tools, so the LLM picks the tool</td></tr>
   <tr><td><code>service/OrderService</code></td><td>In-memory store, seeded with order 123</td></tr>
   <tr><td><code>model/Order, CreateOrderRequest</code></td><td>Java records</td></tr>
-  <tr><td><code>application.yml</code></td><td>Port 8080, MCP server name/version, OpenAI settings (key from <code>OPENAI_API_KEY</code>)</td></tr>
+  <tr><td><code>application.yml</code></td><td>Port 8080, MCP server name/version</td></tr>
 </table>
 
 <h2>6. Run it</h2>
@@ -128,15 +127,25 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
 
 <h2>9. How to test</h2>
 <p>Use <code>8080</code> when running with <code>java -jar</code>, or <code>9004</code> when running with Docker. Examples below use 9004. In Postman: <em>Import &rarr; Raw text</em> and paste any <code>curl</code> command below.</p>
+<p>Testing is done in three layers. Each layer proves one thing, and a failure tells you where the problem is:</p>
+<table>
+  <tr><th>Layer</th><th>What it proves</th><th>If it fails</th></tr>
+  <tr><td>9.1 REST APIs</td><td>The business logic and the two "existing APIs" work on their own, with no MCP involved</td><td>Bug in <code>OrderController</code> / <code>OrderService</code></td></tr>
+  <tr><td>9.2 MCP protocol</td><td>The MCP server exposes the tools, with the right names, descriptions and parameters, and each tool really calls the REST API</td><td>Bug in <code>OrderTools</code>, tool registration, or the SSE/MCP config</td></tr>
+  <tr><td>9.3 Agent (Copilot CLI)</td><td>A model reads a plain sentence and picks the right tool(s) and arguments</td><td>Poor tool descriptions, or a provider / model configuration problem</td></tr>
+</table>
+<p>Run the layers in order. The sample data is an in-memory store seeded with order 123 (Alice, Laptop, 1). New orders get IDs 124, 125, ... and are lost when the server restarts.</p>
 
 <h3>9.1 Test the REST APIs</h3>
+<p><strong>Goal:</strong> confirm the two existing APIs behave correctly before MCP wraps them. The MCP tools only call these endpoints, so if these are wrong, everything above is wrong.</p>
 <table>
-  <tr><th>Test</th><th>cURL</th><th>Expected</th></tr>
-  <tr><td>Search existing order</td><td><pre>curl http://localhost:9004/api/orders/123</pre></td><td>200 with order 123 (Alice, Laptop)</td></tr>
-  <tr><td>Search missing order</td><td><pre>curl -i http://localhost:9004/api/orders/999</pre></td><td>404</td></tr>
-  <tr><td>Create order</td><td><pre>curl -X POST http://localhost:9004/api/orders \
+  <tr><th>Test</th><th>What is being tested</th><th>cURL</th><th>Expected</th></tr>
+  <tr><td>Search existing order</td><td>Lookup by ID returns seeded data</td><td><pre>curl http://localhost:9004/api/orders/123</pre></td><td>200 with order 123 (Alice, Laptop, 1)</td></tr>
+  <tr><td>Search missing order</td><td>An unknown ID is reported as an error status, not an empty 200</td><td><pre>curl -i http://localhost:9004/api/orders/999</pre></td><td>404 (the <code>searchOrder</code> tool turns this into <code>found:false</code>)</td></tr>
+  <tr><td>Create order</td><td>The JSON body is parsed, an ID is generated, and the order is stored</td><td><pre>curl -X POST http://localhost:9004/api/orders \
   -H "Content-Type: application/json" \
-  -d '{"customerName":"Bob","product":"Phone","quantity":2}'</pre></td><td>201 with new order (id 124, 125, ...)</td></tr>
+  -d '{"customerName":"Bob","product":"Phone","quantity":2}'</pre></td><td>201 with the new order (id 124, 125, ...) and status CREATED</td></tr>
+  <tr><td>Create then search</td><td>The created order is really stored (use the id from the previous call)</td><td><pre>curl http://localhost:9004/api/orders/124</pre></td><td>200 with Bob, Phone, 2</td></tr>
 </table>
 <p><strong>Windows PowerShell:</strong> <code>curl</code> is an alias, so use <code>curl.exe</code>, or <code>Invoke-RestMethod</code>:</p>
 <pre>Invoke-RestMethod -Method Post http://localhost:9004/api/orders `
@@ -144,12 +153,13 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
   -Body '{"customerName":"Bob","product":"Phone","quantity":2}'</pre>
 
 <h3>9.2 Test the MCP tools (SSE transport)</h3>
-<p>MCP over SSE uses two connections: keep the SSE stream open to receive responses, and POST requests to the session endpoint.
+<p><strong>Goal:</strong> act as an MCP client by hand, to prove that the server speaks MCP and the tools work. This is exactly what Copilot CLI does for you automatically.</p>
+<p>MCP over SSE uses two connections: keep the SSE stream open to receive responses, and POST requests to the session endpoint. The POST only returns <code>Accepted</code>; the real JSON-RPC result is printed in the terminal that holds the stream.
 In Postman, create a <em>GET</em> request to <code>/sse</code> (keeps streaming) and send the POSTs from a second request.</p>
 <ol>
-  <li><strong>Open the stream</strong> (terminal 1, leave it running). It prints an endpoint such as <code>/mcp/message?sessionId=abc-123</code>:
+  <li><strong>Open the stream</strong> (terminal 1, leave it running). <em>Tests:</em> the SSE endpoint is up and creates a session. It prints an endpoint such as <code>/mcp/message?sessionId=abc-123</code>; use that sessionId below:
 <pre>curl -N http://localhost:9004/sse</pre></li>
-  <li><strong>Initialize</strong> (terminal 2; replace the sessionId):
+  <li><strong>Initialize</strong> (terminal 2; replace the sessionId). <em>Tests:</em> the MCP handshake. The result in terminal 1 contains the server name <code>order-mcp-server</code> and its capabilities. MCP requires this before any other call:
 <pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
@@ -157,76 +167,48 @@ In Postman, create a <em>GET</em> request to <code>/sse</code> (keeps streaming)
 curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'</pre></li>
-  <li><strong>List tools</strong> (expect <code>searchOrder</code> and <code>createOrder</code>):
+  <li><strong>List tools</strong>. <em>Tests:</em> tool discovery, which is how a client's LLM learns what it can call. Expect <code>searchOrder</code> and <code>createOrder</code>, each with its description and input schema. If a tool is missing here, no model can ever use it:
 <pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'</pre></li>
-  <li><strong>Call searchOrder</strong>:
+  <li><strong>Call searchOrder</strong>. <em>Tests:</em> the read tool end to end (MCP &rarr; <code>OrderTools</code> &rarr; REST &rarr; service). Expect <code>{"found":true,"order":{...},"message":"Order found"}</code>. Change <code>orderId</code> to 999 to check <code>found:false</code>:
 <pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"searchOrder","arguments":{"orderId":123}}}'</pre></li>
-  <li><strong>Call createOrder</strong>:
+  <li><strong>Call createOrder</strong>. <em>Tests:</em> the write tool end to end, including argument mapping (<code>customerName</code>, <code>product</code>, <code>quantity</code>). Expect the new order with status CREATED:
 <pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"createOrder","arguments":{"customerName":"Bob","product":"Phone","quantity":2}}}'</pre></li>
+  <li><strong>Confirm the write really happened</strong> (REST, not MCP). <em>Tests:</em> the tool changed the same data the REST API reads:
+<pre>curl http://localhost:9004/api/orders/124</pre></li>
 </ol>
-<p>The POST itself returns <code>Accepted</code>; the JSON-RPC results appear in the terminal 1 stream.
-Expected for <code>searchOrder</code> 123: <code>{"found":true,"order":{...},"message":"Order found"}</code>; for an unknown ID: <code>found:false</code>.</p>
+<p><strong>Common errors:</strong> <code>400</code> on <code>/mcp/message</code> usually means broken JSON quoting (on Windows use <code>curl.exe</code> with a body file: <code>-d "@body.json"</code>); an unknown or expired <code>sessionId</code> means reopen the stream and use the new id.</p>
 
-<h3>9.3 Test with the built-in chat agent (<code>POST /chat</code>)</h3>
-<p>This is the easiest way to try the "natural language &rarr; right API" flow. The server sends your sentence to <strong>OpenAI</strong> together with the
-<code>searchOrder</code> and <code>createOrder</code> tools. OpenAI decides which to call, the server runs them, and OpenAI returns the final answer.</p>
-<p><strong>Prerequisite:</strong> an OpenAI API key (platform.openai.com), set before starting the app:</p>
-<pre># PowerShell
-$env:OPENAI_API_KEY="your-key"
-java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar
+<h3>9.3 Test with Copilot CLI as the agent (bring your own model)</h3>
+<p>The server has no LLM of its own. Copilot CLI acts as the agent: it uses your model provider (BYOK) and calls the MCP tools. Start the server (<code>docker compose up -d --build</code>), then:</p>
+<pre># PowerShell: provider settings (Azure example)
+$env:COPILOT_PROVIDER_TYPE="azure"
+$env:COPILOT_PROVIDER_BASE_URL="https://&lt;resource&gt;.openai.azure.com"
+$env:COPILOT_PROVIDER_API_KEY="&lt;your key&gt;"
+$env:COPILOT_PROVIDER_MODEL_ID="gpt-5.3-codex"
+$env:COPILOT_PROVIDER_WIRE_MODEL="&lt;deployment name&gt;"
+$env:COPILOT_PROVIDER_WIRE_API="responses"
+# OpenAI instead: TYPE=openai, BASE_URL=https://api.openai.com/v1, API_KEY=sk-...
 
-# Docker (key is read from your shell or a .env file)
-docker compose up --build</pre>
-<p>In IntelliJ, set <code>OPENAI_API_KEY</code> under Run Configuration &rarr; Environment variables. With an empty key the chat call fails with an authentication error.</p>
+# register the MCP server once
+copilot mcp add --transport sse order-mcp http://localhost:9004/sse
 
+copilot</pre>
 <table>
-  <tr><th>Scenario</th><th>cURL (Linux / macOS / Git Bash / Postman import)</th><th>Expected</th></tr>
-  <tr><td>Search and create in one message</td>
-      <td><pre>curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Find the order 123, and create an order for Bob, 2 Phones"}'</pre></td>
-      <td>Calls <code>searchOrder(123)</code> then <code>createOrder(Bob, Phone, 2)</code>. The reply summarizes order 123 and the new order ID</td></tr>
-  <tr><td>Search only</td>
-      <td><pre>curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Find the order 123"}'</pre></td>
-      <td>Calls only <code>searchOrder</code></td></tr>
-  <tr><td>Order not found</td>
-      <td><pre>curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Find the order 999"}'</pre></td>
-      <td>Reply says order 999 was not found</td></tr>
-  <tr><td>Create only</td>
-      <td><pre>curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Create an order for Anna, 3 Keyboards"}'</pre></td>
-      <td>Calls only <code>createOrder</code></td></tr>
-  <tr><td>Missing details</td>
-      <td><pre>curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Create an order"}'</pre></td>
-      <td>Asks for customer name, product and quantity instead of guessing</td></tr>
+  <tr><th>Prompt</th><th>What is being tested</th><th>Expected</th></tr>
+  <tr><td>Find the order 123, and create an order for Bob, 2 Phones</td><td>The main scenario: one sentence needs <em>two</em> tools, in order, with arguments extracted from text</td><td>Calls <code>searchOrder(123)</code> then <code>createOrder(Bob, Phone, 2)</code></td></tr>
+  <tr><td>Find the order 123</td><td>The model picks only the read tool and does not create anything</td><td>Calls only <code>searchOrder</code></td></tr>
+  <tr><td>Find the order 999</td><td>The <code>found:false</code> result is handled and explained</td><td>Reports order 999 not found</td></tr>
+  <tr><td>Create an order for Anna, 3 Keyboards</td><td>The model picks only the write tool</td><td>Calls only <code>createOrder</code></td></tr>
+  <tr><td>Create an order</td><td>Missing arguments: the model should ask instead of guessing</td><td>Asks for customer name, product and quantity</td></tr>
 </table>
+<p>Copilot CLI asks for permission before running an MCP tool (approve it, or use the allow options). <strong>Verify with REST</strong>, independent of the model's answer: <code>curl http://localhost:9004/api/orders/124</code> should return Bob's order. This is the proof that the tool was really called and not just described.</p>
 
-<p><strong>Windows PowerShell</strong> (plain <code>curl</code> is an alias, and quote escaping differs):</p>
-<pre>Invoke-RestMethod -Method Post http://localhost:8080/chat `
-  -ContentType application/json `
-  -Body '{"message":"Find the order 123, and create an order for Bob, 2 Phones"}'
-
-# or with curl.exe, using a body file to avoid escaping problems
-'{"message":"Find the order 123, and create an order for Bob, 2 Phones"}' | Set-Content body.json
-curl.exe -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "@body.json"</pre>
-
-<p><strong>Postman:</strong> <code>POST http://localhost:8080/chat</code> &rarr; Body &rarr; raw &rarr; JSON &rarr; <code>{"message":"Find the order 123, and create an order for Bob, 2 Phones"}</code>.
-Use port <code>9004</code> if running in Docker.</p>
-<p><strong>Response format:</strong> <code>{"reply":"Order 123 belongs to Alice (1 Laptop, CREATED). I created order 124 for Bob: 2 Phones."}</code>
-(wording varies, since OpenAI writes it).</p>
 <p><strong>Verify the tools were used:</strong> the new order ID (124, 125, ...) in the reply, and a follow-up <code>curl http://localhost:8080/api/orders/124</code> returning that order.</p>
 
 <h3>9.4 Test with an external AI client</h3>

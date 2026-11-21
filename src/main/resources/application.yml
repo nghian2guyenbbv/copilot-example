@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 9004
 
 spring:
   ai:
@@ -7,3 +7,4 @@ spring:
       server:
         name: order-mcp-server
         version: 1.0.0
+        protocol: STREAMABLE

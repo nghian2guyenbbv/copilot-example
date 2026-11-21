@@ -13,6 +13,10 @@
   code, pre { background: #f4f4f8; border-radius: 4px; }
   code { padding: 1px 5px; }
   pre { padding: 12px; overflow-x: auto; }
+  pre.copyable { position: relative; padding-right: 70px; }
+  .copy-btn { position: absolute; top: 6px; right: 6px; padding: 3px 10px; font-size: 12px; border: 1px solid #b8b8c8; border-radius: 4px; background: #fff; cursor: pointer; }
+  .copy-btn:hover { background: #e8e8f4; }
+  .copy-btn.done { background: #d4f4dd; border-color: #5cb85c; }
   .diagram { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
   .box { border: 2px solid #4a6cf7; border-radius: 8px; padding: 10px 14px; background: #f7f8ff; text-align: center; min-width: 130px; }
   .box small { display: block; color: #555; }
@@ -33,7 +37,7 @@ It exposes two existing order APIs (search and create) as MCP tools so an AI ass
   <span class="arrow">&rarr;</span>
   <div class="box">AI client<small>Copilot / Claude (LLM picks tools)</small></div>
   <span class="arrow">&rarr;</span>
-  <div class="box mcp">MCP Server<small>SSE <code>/sse</code><br>tools: searchOrder, createOrder</small></div>
+  <div class="box mcp">MCP Server<small>Streamable HTTP <code>/mcp</code><br>tools: searchOrder, createOrder</small></div>
   <span class="arrow">&rarr;</span>
   <div class="box">REST API<small>GET / POST <code>/api/orders</code></small></div>
   <span class="arrow">&rarr;</span>
@@ -80,29 +84,29 @@ The LLM in the client reads these descriptions and decides which tool to call an
 <h2>6. Run it</h2>
 <pre>mvn package
 java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
-<p>MCP endpoint (SSE): <code>http://localhost:8080/sse</code></p>
+<p>MCP endpoint (Streamable HTTP): <code>http://localhost:8080/mcp</code></p>
 <p>Or with Docker (host port <strong>9004</strong> &rarr; container 8080):</p>
 <pre>docker compose up --build</pre>
-<p>MCP endpoint (SSE): <code>http://localhost:9004/sse</code></p>
+<p>MCP endpoint (Streamable HTTP): <code>http://localhost:9004/mcp</code></p>
 
 <h2>7. Connect a client</h2>
 <p>Example <code>mcp.json</code> / client config:</p>
 <pre>{
   "mcpServers": {
     "order-mcp-server": {
-      "type": "sse",
-      "url": "http://localhost:8080/sse"
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
     }
   }
 }</pre>
-<p>When running in Docker, use <code>http://localhost:9004/sse</code> instead.</p>
+<p>When running in Docker, use <code>http://localhost:9004/mcp</code> instead.</p>
 <p>Then ask: <em>"Find the order 123, and create an order for Bob, 2 Phones."</em></p>
 
 <h2>8. Step-by-step: how this project was built (and why)</h2>
 <table>
   <tr><th>#</th><th>Step</th><th>What we did</th><th>Why</th></tr>
   <tr><td>1</td><td>Create the Maven project</td><td><code>pom.xml</code> with Spring Boot 3.3 parent, Spring AI BOM and <code>spring-ai-starter-mcp-server-webmvc</code>.</td>
-      <td>The starter auto-configures the MCP protocol, SSE transport and tool registration, so we write no protocol code. The BOM keeps Spring AI versions consistent. Java 17 is Spring Boot 3's minimum.</td></tr>
+      <td>The starter auto-configures the MCP protocol, Streamable HTTP transport and tool registration, so we write no protocol code. The BOM keeps Spring AI versions consistent. Java 17 is Spring Boot 3's minimum.</td></tr>
   <tr><td>2</td><td>Add the application class</td><td><code>OrderMcpApplication</code> with a <code>ToolCallbackProvider</code> bean built from <code>OrderTools</code>.</td>
       <td>MCP only exposes tools that are registered. The bean is what turns <code>@Tool</code> methods into MCP tools.</td></tr>
   <tr><td>3</td><td>Define the models</td><td><code>Order</code> and <code>CreateOrderRequest</code> as Java records.</td>
@@ -116,12 +120,12 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
   <tr><td>7</td><td>Return typed results</td><td><code>searchOrder</code> returns <code>OrderSearchResult(found, order, message)</code>, not <code>Object</code>.</td>
       <td>Spring AI silently ignores tool methods with a generic/functional return type. A typed result also lets the LLM tell "not found" apart from an error.</td></tr>
   <tr><td>8</td><td>Minimal configuration</td><td><code>application.yml</code>: port 8080, MCP name and version.</td>
-      <td>Defaults cover everything else (SSE at <code>/sse</code>). The name and version only make the server identifiable in clients.</td></tr>
-  <tr><td>9</td><td>Build and test</td><td><code>mvn package</code>, then call the tools over the SSE endpoint (<code>tools/call</code>).</td>
+      <td>Defaults cover everything else (<code>protocol: STREAMABLE</code> serves MCP at <code>/mcp</code>; Codex CLI needs this transport). The name and version only make the server identifiable in clients.</td></tr>
+  <tr><td>9</td><td>Build and test</td><td><code>mvn package</code>, then call the tools over the <code>/mcp</code> endpoint (<code>tools/call</code>).</td>
       <td>Proves the tools are registered and return correct data, independent of any AI client. This is how we caught the ignored-tool problem in step 7.</td></tr>
   <tr><td>10</td><td>Containerize</td><td><code>Dockerfile</code> (multi-stage) and <code>docker-compose.yml</code> mapping <code>9004:8080</code>.</td>
       <td>Makes it runnable anywhere without installing Java or Maven. The multi-stage build keeps the final image small. Host port 9004 avoids clashes with other local services on 8080.</td></tr>
-  <tr><td>11</td><td>Connect a client</td><td>Add the SSE URL to the client's MCP config and try the sample prompt.</td>
+  <tr><td>11</td><td>Connect a client</td><td>Add the <code>/mcp</code> URL to the client's MCP config and try the sample prompt.</td>
       <td>The client's LLM discovers the tools via <code>tools/list</code> and chooses which to call, so no routing logic is needed on the server.</td></tr>
 </table>
 
@@ -132,7 +136,7 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
   <tr><th>Layer</th><th>What it proves</th><th>If it fails</th></tr>
   <tr><td>9.1 REST APIs</td><td>The business logic and the two "existing APIs" work on their own, with no MCP involved</td><td>Bug in <code>OrderController</code> / <code>OrderService</code></td></tr>
   <tr><td>9.2 MCP protocol</td><td>The MCP server exposes the tools, with the right names, descriptions and parameters, and each tool really calls the REST API</td><td>Bug in <code>OrderTools</code>, tool registration, or the SSE/MCP config</td></tr>
-  <tr><td>9.3 Agent (Copilot CLI)</td><td>A model reads a plain sentence and picks the right tool(s) and arguments</td><td>Poor tool descriptions, or a provider / model configuration problem</td></tr>
+  <tr><td>9.3 / 9.4 Agent (Copilot CLI / Codex CLI)</td><td>A model reads a plain sentence and picks the right tool(s) and arguments</td><td>Poor tool descriptions, or a provider / model configuration problem</td></tr>
 </table>
 <p>Run the layers in order. The sample data is an in-memory store seeded with order 123 (Alice, Laptop, 1). New orders get IDs 124, 125, ... and are lost when the server restarts.</p>
 
@@ -152,53 +156,64 @@ java -jar target/order-mcp-server-0.0.1-SNAPSHOT.jar</pre>
   -ContentType application/json `
   -Body '{"customerName":"Bob","product":"Phone","quantity":2}'</pre>
 
-<h3>9.2 Test the MCP tools (SSE transport)</h3>
-<p><strong>Goal:</strong> act as an MCP client by hand, to prove that the server speaks MCP and the tools work. This is exactly what Copilot CLI does for you automatically.</p>
-<p>MCP over SSE uses two connections: keep the SSE stream open to receive responses, and POST requests to the session endpoint. The POST only returns <code>Accepted</code>; the real JSON-RPC result is printed in the terminal that holds the stream.
-In Postman, create a <em>GET</em> request to <code>/sse</code> (keeps streaming) and send the POSTs from a second request.</p>
+<h3>9.2 Test the MCP tools (Streamable HTTP, <code>/mcp</code>)</h3>
+<p><strong>Goal:</strong> act as an MCP client by hand, to prove that the server speaks MCP and the tools work. This is exactly what Copilot CLI and Codex CLI do for you automatically.</p>
+<p>The server uses the <strong>Streamable HTTP</strong> transport: one endpoint, <code>POST /mcp</code>. Every request needs the header <code>Accept: application/json, text/event-stream</code>. The server returns a <code>Mcp-Session-Id</code> header on <code>initialize</code>, and you must send it on every later call. Replies come back in the HTTP response (as an SSE <code>data:</code> line), so no second terminal is needed.</p>
+<p><strong>Windows:</strong> plain <code>curl</code> is a PowerShell alias, so use <code>curl.exe</code>, and put the JSON in a file (<code>-d "@body.json"</code>) to avoid quote-escaping errors. The examples below use Linux / macOS / Git Bash syntax.</p>
 <ol>
-  <li><strong>Open the stream</strong> (terminal 1, leave it running). <em>Tests:</em> the SSE endpoint is up and creates a session. It prints an endpoint such as <code>/mcp/message?sessionId=abc-123</code>; use that sessionId below:
-<pre>curl -N http://localhost:9004/sse</pre></li>
-  <li><strong>Initialize</strong> (terminal 2; replace the sessionId). <em>Tests:</em> the MCP handshake. The result in terminal 1 contains the server name <code>order-mcp-server</code> and its capabilities. MCP requires this before any other call:
-<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
+  <li><strong>Initialize.</strong> <em>Tests:</em> the MCP handshake. The reply holds the server name <code>order-mcp-server</code> and its capabilities. MCP requires it before any other call. Copy the <code>Mcp-Session-Id</code> value from the response headers (<code>-i</code> shows them):
+<pre>curl -i -X POST http://localhost:9004/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
-
-curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'</pre></li>
+  <li><strong>Send "initialized".</strong> <em>Tests:</em> the client confirms the handshake. Expect HTTP <code>202</code> and no body (replace <code>SESSION</code> with the id from step 1; this applies to all later steps):
+<pre>curl -i -X POST http://localhost:9004/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: SESSION" \
   -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'</pre></li>
-  <li><strong>List tools</strong>. <em>Tests:</em> tool discovery, which is how a client's LLM learns what it can call. Expect <code>searchOrder</code> and <code>createOrder</code>, each with its description and input schema. If a tool is missing here, no model can ever use it:
-<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
+  <li><strong>List tools.</strong> <em>Tests:</em> tool discovery, which is how a client's LLM learns what it can call. Expect <code>searchOrder</code> and <code>createOrder</code>, each with its description and input schema. If a tool is missing here, no model can ever use it:
+<pre>curl -X POST http://localhost:9004/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: SESSION" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'</pre></li>
-  <li><strong>Call searchOrder</strong>. <em>Tests:</em> the read tool end to end (MCP &rarr; <code>OrderTools</code> &rarr; REST &rarr; service). Expect <code>{"found":true,"order":{...},"message":"Order found"}</code>. Change <code>orderId</code> to 999 to check <code>found:false</code>:
-<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
+  <li><strong>Call searchOrder.</strong> <em>Tests:</em> the read tool end to end (MCP &rarr; <code>OrderTools</code> &rarr; REST &rarr; service). Expect <code>{"found":true,"order":{...},"message":"Order found"}</code>. Change <code>orderId</code> to 999 to check <code>found:false</code>:
+<pre>curl -X POST http://localhost:9004/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: SESSION" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"searchOrder","arguments":{"orderId":123}}}'</pre></li>
-  <li><strong>Call createOrder</strong>. <em>Tests:</em> the write tool end to end, including argument mapping (<code>customerName</code>, <code>product</code>, <code>quantity</code>). Expect the new order with status CREATED:
-<pre>curl -X POST "http://localhost:9004/mcp/message?sessionId=abc-123" \
+  <li><strong>Call createOrder.</strong> <em>Tests:</em> the write tool end to end, including argument mapping (<code>customerName</code>, <code>product</code>, <code>quantity</code>). Expect the new order with status CREATED:
+<pre>curl -X POST http://localhost:9004/mcp \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: SESSION" \
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"createOrder","arguments":{"customerName":"Bob","product":"Phone","quantity":2}}}'</pre></li>
   <li><strong>Confirm the write really happened</strong> (REST, not MCP). <em>Tests:</em> the tool changed the same data the REST API reads:
 <pre>curl http://localhost:9004/api/orders/124</pre></li>
 </ol>
-<p><strong>Common errors:</strong> <code>400</code> on <code>/mcp/message</code> usually means broken JSON quoting (on Windows use <code>curl.exe</code> with a body file: <code>-d "@body.json"</code>); an unknown or expired <code>sessionId</code> means reopen the stream and use the new id.</p>
+<p><strong>Common errors:</strong> <code>400</code> usually means broken JSON quoting (use a body file on Windows); <code>406 Not Acceptable</code> means the <code>Accept</code> header is missing; a session error means the <code>Mcp-Session-Id</code> is missing or stale, so run <code>initialize</code> again.</p>
 
 <h3>9.3 Test with Copilot CLI as the agent (bring your own model)</h3>
-<p>The server has no LLM of its own. Copilot CLI acts as the agent: it uses your model provider (BYOK) and calls the MCP tools. Start the server (<code>docker compose up -d --build</code>), then:</p>
-<pre># PowerShell: provider settings (Azure example)
-$env:COPILOT_PROVIDER_TYPE="azure"
+<p>The server has no LLM of its own. Copilot CLI acts as the agent: it uses your model provider (BYOK) and calls the MCP tools. Step by step:</p>
+<ol>
+  <li><strong>Start the server</strong> and check it answers: <pre>docker compose up -d --build
+curl http://localhost:9004/api/orders/123</pre></li>
+  <li><strong>Set the provider</strong> (PowerShell, Azure example). <em>Why:</em> tells Copilot which model and key to use instead of a Copilot subscription model:
+<pre>$env:COPILOT_PROVIDER_TYPE="azure"
 $env:COPILOT_PROVIDER_BASE_URL="https://&lt;resource&gt;.openai.azure.com"
 $env:COPILOT_PROVIDER_API_KEY="&lt;your key&gt;"
 $env:COPILOT_PROVIDER_MODEL_ID="gpt-5.3-codex"
 $env:COPILOT_PROVIDER_WIRE_MODEL="&lt;deployment name&gt;"
 $env:COPILOT_PROVIDER_WIRE_API="responses"
-# OpenAI instead: TYPE=openai, BASE_URL=https://api.openai.com/v1, API_KEY=sk-...
-
-# register the MCP server once
-copilot mcp add --transport sse order-mcp http://localhost:9004/sse
-
-copilot</pre>
+# OpenAI instead: TYPE=openai, BASE_URL=https://api.openai.com/v1, API_KEY=sk-...</pre></li>
+  <li><strong>Register the MCP server once.</strong> <em>Why:</em> tells Copilot where the tools live:
+<pre>copilot mcp add --transport http order-mcp http://localhost:9004/mcp</pre></li>
+  <li><strong>Start Copilot and check the tools:</strong> run <code>copilot</code>, then <code>/mcp</code>. <code>order-mcp</code> should be listed with <code>searchOrder</code> and <code>createOrder</code>.</li>
+  <li><strong>Ask the prompts below</strong> and approve the tool calls when asked.</li>
+  <li><strong>Verify with REST</strong>, independent of the model's answer: <pre>curl http://localhost:9004/api/orders/124</pre> should return Bob's order. This proves the tool was really called, not just described.</li>
+</ol>
 <table>
   <tr><th>Prompt</th><th>What is being tested</th><th>Expected</th></tr>
   <tr><td>Find the order 123, and create an order for Bob, 2 Phones</td><td>The main scenario: one sentence needs <em>two</em> tools, in order, with arguments extracted from text</td><td>Calls <code>searchOrder(123)</code> then <code>createOrder(Bob, Phone, 2)</code></td></tr>
@@ -207,14 +222,25 @@ copilot</pre>
   <tr><td>Create an order for Anna, 3 Keyboards</td><td>The model picks only the write tool</td><td>Calls only <code>createOrder</code></td></tr>
   <tr><td>Create an order</td><td>Missing arguments: the model should ask instead of guessing</td><td>Asks for customer name, product and quantity</td></tr>
 </table>
-<p>Copilot CLI asks for permission before running an MCP tool (approve it, or use the allow options). <strong>Verify with REST</strong>, independent of the model's answer: <code>curl http://localhost:9004/api/orders/124</code> should return Bob's order. This is the proof that the tool was really called and not just described.</p>
 
-<p><strong>Verify the tools were used:</strong> the new order ID (124, 125, ...) in the reply, and a follow-up <code>curl http://localhost:8080/api/orders/124</code> returning that order.</p>
+<h3>9.4 Test with Codex CLI</h3>
+<p>Codex CLI uses your OpenAI login or <code>OPENAI_API_KEY</code>, so the <code>COPILOT_PROVIDER_*</code> variables are not needed. Codex connects to Streamable HTTP servers directly through a <code>url</code>.</p>
+<ol>
+  <li><strong>Start the server</strong> (same as 9.3 step 1).</li>
+  <li><strong>Register the server.</strong> <em>Why:</em> tells Codex where the tools live. Either run:
+<pre>codex mcp add order-mcp --url http://localhost:9004/mcp</pre>
+or edit <code>~/.codex/config.toml</code> (Windows: <code>%USERPROFILE%\.codex\config.toml</code>):
+<pre>[mcp_servers.order-mcp]
+url = "http://localhost:9004/mcp"</pre></li>
+  <li><strong>Check it is registered:</strong> <pre>codex mcp list</pre> shows <code>order-mcp</code>. Inside Codex, <code>/mcp</code> lists its tools. <em>Tests:</em> discovery from Codex's side. If the tools are missing, run the 9.2 cURL steps to see whether the server or the client config is at fault.</li>
+  <li><strong>Run and ask</strong> the same prompts as the 9.3 table: <pre>codex
+&gt; Find the order 123, and create an order for Bob, 2 Phones</pre> Approve the tool calls.</li>
+  <li><strong>Verify with REST:</strong> <pre>curl http://localhost:9004/api/orders/124</pre></li>
+</ol>
+<p>If your Codex version does not support <code>url</code>, use the bridge instead: <code>command = "npx"</code>, <code>args = ["-y", "mcp-remote", "http://localhost:9004/mcp"]</code> under <code>[mcp_servers.order-mcp]</code>.</p>
 
-<h3>9.4 Test with an external AI client</h3>
-<p>Add the SSE URL to your client, then ask: <em>"Find the order 123, and create an order for Bob, 2 Phones."</em>
-Check that the client calls <code>searchOrder</code> first, then <code>createOrder</code>.
-Alternatively use the MCP Inspector: <code>npx @modelcontextprotocol/inspector</code> &rarr; transport SSE &rarr; URL <code>http://localhost:9004/sse</code>.</p>
+<h3>9.5 Other MCP clients</h3>
+<p>Add the URL <code>http://localhost:9004/mcp</code> (transport "streamable HTTP") to the client, then ask the same prompts. Or use the MCP Inspector: <code>npx @modelcontextprotocol/inspector</code> &rarr; transport <em>Streamable HTTP</em> &rarr; URL <code>http://localhost:9004/mcp</code> &rarr; <em>List Tools</em>.</p>
 
 <h2>10. Notes</h2>
 <ul>
@@ -222,5 +248,37 @@ Alternatively use the MCP Inspector: <code>npx @modelcontextprotocol/inspector</
   <li>To target a separate order service, set <code>order.api.base-url</code> (default: this app).</li>
 </ul>
 
+<script>
+document.querySelectorAll('pre').forEach(function (pre) {
+  if (pre.closest('.diagram')) return;
+  pre.classList.add('copyable');
+  var btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.type = 'button';
+  btn.textContent = 'Copy';
+  btn.addEventListener('click', function () {
+    var text = pre.cloneNode(true);
+    text.querySelectorAll('.copy-btn').forEach(function (b) { b.remove(); });
+    var value = text.textContent.trim();
+    var done = function () {
+      btn.textContent = 'Copied!';
+      btn.classList.add('done');
+      setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 1500);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(value).then(done);
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = value;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      done();
+    }
+  });
+  pre.appendChild(btn);
+});
+</script>
 </body>
 </html>
